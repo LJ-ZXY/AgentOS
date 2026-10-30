@@ -554,6 +554,25 @@ static NSString *const kPosYKey = @"ui.barY";
                         [NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (text.length == 0) return;
 
+    // Direct Import Detection from Input Box
+    IOSDebSkill *skill = [IOSDebSkill fromJSONString:text];
+    if (skill && skill.name.length > 0) {
+        _input.text = @"";
+        _counter.text = @"0 / 500";
+        [_input resignFirstResponder];
+        [_panel endEditing:YES];
+        [[IOSDebSkillStore shared] save:skill];
+        [self reloadSkillChips];
+        [self setStatus:[NSString stringWithFormat:@"已成功导入「%@」！", skill.name]
+                  color:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1]];
+        if (@available(iOS 10.0, *)) {
+            UINotificationFeedbackGenerator *gen = [[UINotificationFeedbackGenerator alloc] init];
+            [gen prepare];
+            [gen notificationOccurred:UINotificationFeedbackTypeSuccess];
+        }
+        return;
+    }
+
     IOSDebStore *store = [IOSDebStore shared];
     if (![store isAIConfigured]) {
         [self setStatus:[NSString stringWithFormat:@"缺少配置 · model=%@ · %@",
@@ -892,63 +911,31 @@ static NSString *const kPosYKey = @"ui.barY";
 
 - (void)onImport {
     UIPasteboard *pb = [UIPasteboard generalPasteboard];
-    NSString *clip = [pb.string stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *clip = nil;
+    @try {
+        clip = pb.string;
+    } @catch (__unused NSException *e) {}
+
     IOSDebSkill *skill = [IOSDebSkill fromJSONString:clip];
     if (skill && skill.name.length > 0) {
-        [self presentImportCardForSkill:skill];
+        [[IOSDebSkillStore shared] save:skill];
+        [self reloadSkillChips];
+        [self setStatus:[NSString stringWithFormat:@"已成功导入「%@」！", skill.name]
+                  color:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1]];
+        if (@available(iOS 10.0, *)) {
+            UINotificationFeedbackGenerator *gen = [[UINotificationFeedbackGenerator alloc] init];
+            [gen prepare];
+            [gen notificationOccurred:UINotificationFeedbackTypeSuccess];
+        }
         return;
     }
 
-    UIAlertController *prompt =
-        [UIAlertController alertControllerWithTitle:@"导入新技能"
-                                            message:@"未在剪贴板中检测到有效技能。请在下方粘贴他人分享的技能口令/JSON："
-                                     preferredStyle:UIAlertControllerStyleAlert];
-    [prompt addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.placeholder = @"在此粘贴技能 JSON 口令";
-    }];
-    __weak typeof(self) weakSelf = self;
-    [prompt addAction:[UIAlertAction actionWithTitle:@"解析并导入"
-                                               style:UIAlertActionStyleDefault
-                                             handler:^(__unused UIAlertAction *a) {
-        NSString *text = prompt.textFields.firstObject.text;
-        IOSDebSkill *pSkill = [IOSDebSkill fromJSONString:text];
-        if (pSkill && pSkill.name.length) {
-            [weakSelf presentImportCardForSkill:pSkill];
-        } else {
-            [weakSelf setStatus:@"未能解析技能数据，请确认格式" color:[UIColor orangeColor]];
-        }
-    }]];
-    [prompt addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [[self topViewController] presentViewController:prompt animated:YES completion:nil];
-}
-
-- (void)presentImportCardForSkill:(IOSDebSkill *)draft {
-    NSMutableString *msg = [NSMutableString string];
-    [msg appendFormat:@"技能名称：%@\n", draft.name];
-    if (draft.appName.length || draft.appBundleID.length) {
-        [msg appendFormat:@"目标应用：%@%@\n", draft.appName ?: @"",
-                 draft.appBundleID.length ? [NSString stringWithFormat:@"（%@）", draft.appBundleID] : @""];
+    [self setStatus:@"剪贴板未发现有效技能口令，可粘贴至输入框后发送" color:[UIColor orangeColor]];
+    if (@available(iOS 10.0, *)) {
+        UINotificationFeedbackGenerator *gen = [[UINotificationFeedbackGenerator alloc] init];
+        [gen prepare];
+        [gen notificationOccurred:UINotificationFeedbackTypeWarning];
     }
-    [msg appendFormat:@"版本：v%ld\n", (long)draft.version];
-    if (draft.entrySteps.count) [msg appendFormat:@"进入步骤：%lu 步\n", (unsigned long)draft.entrySteps.count];
-    if (draft.loopSteps.count) [msg appendFormat:@"循环体：%lu 步\n", (unsigned long)draft.loopSteps.count];
-    if (draft.stopCondition.length) [msg appendFormat:@"停止条件：%@\n", draft.stopCondition];
-
-    UIAlertController *alert =
-        [UIAlertController alertControllerWithTitle:@"确认导入技能"
-                                            message:msg
-                                     preferredStyle:UIAlertControllerStyleAlert];
-    __weak typeof(self) weakSelf = self;
-    [alert addAction:[UIAlertAction actionWithTitle:@"确认导入"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *a) {
-        [[IOSDebSkillStore shared] save:draft];
-        [weakSelf reloadSkillChips];
-        [weakSelf setStatus:[NSString stringWithFormat:@"已成功导入「%@」", draft.name]
-                      color:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1]];
-    }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [[self topViewController] presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)onChipLongPress:(UILongPressGestureRecognizer *)g {

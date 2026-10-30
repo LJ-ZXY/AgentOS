@@ -23,6 +23,11 @@
   - **完成态（Done）**：变更为翡翠绿背景并显示 `✓ 完成`，同时触发 iOS 系统成功触感震动（Taptic Feedback），3 秒后平滑复原。
   - **中断/异常态（Stopped / Error）**：变更为警示橙背景并显示 `! 停止` 或 `! 异常`，伴随警告震动反馈。
   - **执行自折叠**：点击技能运行后浮窗自动收拢，绝不遮挡下层应用操作视野。
+- ⚡ **抽屉式技能中心与静默导入（Zero-Lock Import & Drawer）**：
+  - 点击「⚡ 技能库」平滑唤出垂直全景抽屉，长技能名完整展示零截断，支持单次测试、多轮循环与一键删除。
+  - **剪贴板静默导入**：点击「+ 导入」零弹窗秒级静默入库，彻底杜绝 SpringBoard 键盘焦点竞争引发的系统级假死。
+  - **微信字符强容错**：自动截取最外层 JSON，智能识别并纠正微信自动转义的中文全角引号（“ ”）与聊天前缀，粘贴即用。
+  - **主输入框双通道**：口令直接粘贴至输入框发送亦可完成导入。
 - 💾 **结构化技能持久化（Skill Store）**：
   - 技能以标准 XML plist 格式保存在本地存储区（`/var/mobile/Media/ios-deb/skills/`），不受插件升级覆盖影响，便于备份与跨设备迁移。
   - 自动记录技能版本递增、历史执行次数与成功率统计并在浮窗上实时展示。
@@ -85,14 +90,14 @@ chmod +x build_roothide.sh
 ./build_roothide.sh
 ```
 
-构建成功后，将在 `packages/` 目录下生成类似 `com.witchan.ios-deb_1.2.1_iphoneos-arm64e.deb` 安装包。
+构建成功后，将在 `packages/` 目录下生成类似 `com.witchan.ios-deb_1.2.2_iphoneos-arm64e.deb` 安装包。
 
 ### 设备安装与部署
 
 可直接推送到越狱设备并通过 `dpkg` 安装：
 
 ```bash
-dpkg -i com.witchan.ios-deb_1.2.1_iphoneos-arm64e.deb
+dpkg -i com.witchan.ios-deb_1.2.2_iphoneos-arm64e.deb
 killall -9 SpringBoard
 ```
 

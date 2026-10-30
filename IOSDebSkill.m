@@ -65,6 +65,8 @@ static NSArray<NSString *> *IOSDebSkillStrings(id value) {
 + (nullable instancetype)fromJSONString:(NSString *)text {
     if (text.length == 0) return nil;
     NSString *trimmed = [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+    // 1. Strip markdown fences if present
     NSRange fence = [trimmed rangeOfString:@"```"];
     if (fence.location != NSNotFound) {
         NSString *rest = [trimmed substringFromIndex:fence.location + fence.length];
@@ -73,6 +75,20 @@ static NSArray<NSString *> *IOSDebSkillStrings(id value) {
         if (end.location != NSNotFound) rest = [rest substringToIndex:end.location];
         trimmed = [rest stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     }
+
+    // 2. Extract outermost JSON object { ... } if surrounded by chat/forwarding text
+    NSRange openBrace = [trimmed rangeOfString:@"{"];
+    NSRange closeBrace = [trimmed rangeOfString:@"}" options:NSBackwardsSearch];
+    if (openBrace.location != NSNotFound && closeBrace.location != NSNotFound && closeBrace.location > openBrace.location) {
+        trimmed = [trimmed substringWithRange:NSMakeRange(openBrace.location, closeBrace.location - openBrace.location + 1)];
+    }
+
+    // 3. Normalize smart quotes that WeChat / iOS keyboard often convert
+    trimmed = [trimmed stringByReplacingOccurrencesOfString:@"“" withString:@"\""];
+    trimmed = [trimmed stringByReplacingOccurrencesOfString:@"”" withString:@"\""];
+    trimmed = [trimmed stringByReplacingOccurrencesOfString:@"‘" withString:@"'"];
+    trimmed = [trimmed stringByReplacingOccurrencesOfString:@"’" withString:@"'"];
+
     NSData *data = [trimmed dataUsingEncoding:NSUTF8StringEncoding];
     if (!data) return nil;
     id obj = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
