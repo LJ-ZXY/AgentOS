@@ -38,7 +38,8 @@ else ifeq ($(THEOS_PACKAGE_SCHEME),rootless)
 endif
 
 iosdebprefs_FILES = prefs/IOSDEBRootListController.m \
-                    prefs/IOSDEBLocalization.m
+                    prefs/IOSDEBLocalization.m \
+                    prefs/IOSDEBQRCodeCell.m
 iosdebprefs_CFLAGS = -fobjc-arc
 iosdebprefs_FRAMEWORKS = UIKit CoreGraphics
 iosdebprefs_PRIVATE_FRAMEWORKS = Preferences

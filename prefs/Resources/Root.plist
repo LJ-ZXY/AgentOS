@@ -200,6 +200,28 @@
 			<key>label</key>
 			<string>清空日志</string>
 		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
+			<string>微信扫码关注公众号，获取 AgentOS 最新配方与使用技巧。</string>
+			<key>label</key>
+			<string>关于作者</string>
+		</dict>
+		<dict>
+			<key>caption</key>
+			<string>职场阿江笔记</string>
+			<key>cell</key>
+			<string>PSStaticTextCell</string>
+			<key>cellClass</key>
+			<string>IOSDEBQRCodeCell</string>
+			<key>enabled</key>
+			<false/>
+			<key>height</key>
+			<integer>310</integer>
+			<key>qrImageName</key>
+			<string>wechat_qr.jpg</string>
+		</dict>
 	</array>
 	<key>title</key>
 	<string>AgentOS</string>
