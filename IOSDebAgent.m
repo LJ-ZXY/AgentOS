@@ -148,7 +148,17 @@ static NSString *IOSDebHumanTool(NSString *name) {
     BOOL _cancelled;
     NSMutableArray<NSDictionary *> *_messages;
     NSArray *_toolSchema;
+
+    // Custom dynamic step quota & Circuit breakers
+    NSInteger _customStepLimit;
+    NSString *_lastActionName;
+    NSDictionary *_lastActionArgs;
+    NSInteger _consecutiveSameActionCount;
+    NSString *_lastScreenSig;
+    NSInteger _stagnantScreenCount;
 }
+
+@synthesize customStepLimit = _customStepLimit;
 
 + (instancetype)shared {
     static IOSDebAgent *a;
@@ -167,7 +177,15 @@ static NSString *IOSDebHumanTool(NSString *name) {
 - (BOOL)isRunning { return _running; }
 - (NSInteger)currentStep { return _currentStep; }
 - (NSInteger)tokenUsage { return _tokenUsage; }
-- (NSInteger)stepLimit { return [IOSDebStore shared].stepLimit; }
+- (NSInteger)stepLimit {
+    if (_customStepLimit > 0) return _customStepLimit;
+    return [IOSDebStore shared].stepLimit;
+}
+
+- (void)run:(NSString *)instruction withStepLimit:(NSInteger)limit {
+    _customStepLimit = limit;
+    [self run:instruction];
+}
 
 - (void)emit:(NSString *)event step:(IOSDebAgentStep *)step message:(NSString *)msg {
     void (^handler)(NSString *, IOSDebAgent *, IOSDebAgentStep *, NSString *) = self.eventHandler;
@@ -287,6 +305,11 @@ static NSString *IOSDebHumanTool(NSString *name) {
     _cancelled = NO;
     _currentStep = 0;
     _tokenUsage = 0;
+    _consecutiveSameActionCount = 0;
+    _lastActionName = nil;
+    _lastActionArgs = nil;
+    _stagnantScreenCount = 0;
+    _lastScreenSig = nil;
 
     [[IOSDebMCPClient shared] setEndpoint:store.endpoint];
 
@@ -360,10 +383,10 @@ static NSString *IOSDebHumanTool(NSString *name) {
 - (void)stepLoop {
     if (_cancelled) { [self finish:IOSDebAgentEndStopped message:@"已停止"]; return; }
 
-    IOSDebStore *store = [IOSDebStore shared];
-    if (_currentStep >= store.stepLimit) {
+    NSInteger effectiveLimit = self.stepLimit;
+    if (_currentStep >= effectiveLimit) {
         [self finish:IOSDebAgentEndStepLimit
-             message:[NSString stringWithFormat:@"已达到 %ld 步上限", (long)store.stepLimit]];
+             message:[NSString stringWithFormat:@"已达到 %ld 步上限", (long)effectiveLimit]];
         return;
     }
 
@@ -423,6 +446,21 @@ static NSString *IOSDebHumanTool(NSString *name) {
 
 - (void)executeTool:(NSString *)name args:(NSDictionary *)args
              callID:(NSString *)callID attempt:(NSInteger)attempt {
+    if (attempt == 1) {
+        if (name.length && [name isEqualToString:self->_lastActionName] && [args isEqualToDictionary:self->_lastActionArgs]) {
+            self->_consecutiveSameActionCount++;
+            if (self->_consecutiveSameActionCount >= 3) {
+                IOSDebLog(@"[agent] circuit breaker triggered: repeated action %@ 3 times", name);
+                [self finish:IOSDebAgentEndFailed message:[NSString stringWithFormat:@"检测到重复操作「%@」死循环，已自动保护性停止", IOSDebHumanTool(name)]];
+                return;
+            }
+        } else {
+            self->_consecutiveSameActionCount = 1;
+            self->_lastActionName = [name copy];
+            self->_lastActionArgs = [args copy];
+        }
+    }
+
     _currentStep += 1;
 
     IOSDebAgentStep *step = [[IOSDebAgentStep alloc] init];
@@ -449,6 +487,24 @@ static NSString *IOSDebHumanTool(NSString *name) {
                                                                                      encoding:NSUTF8StringEncoding];
         step.ok = (error == nil);
         [self emit:IOSDebAgentEventStep step:step message:nil];
+
+        // Circuit breaker: Screen stagnation detection
+        if (step.ok && ([name isEqualToString:@"describe_screen"] || [name isEqualToString:@"get_ui_elements"])) {
+            NSString *sig = [self screenSignatureFromResult:result];
+            if (sig.length > 0) {
+                if ([sig isEqualToString:self->_lastScreenSig]) {
+                    self->_stagnantScreenCount++;
+                    if (self->_stagnantScreenCount >= 4) {
+                        IOSDebLog(@"[agent] circuit breaker triggered: screen stagnant for 4 cycles");
+                        [self finish:IOSDebAgentEndFailed message:@"检测到页面持续无响应/无变化，已自动保护性停止"];
+                        return;
+                    }
+                } else {
+                    self->_stagnantScreenCount = 0;
+                    self->_lastScreenSig = [sig copy];
+                }
+            }
+        }
 
         NSString *trimmed = content ?: @"";
         if (trimmed.length > 6000) trimmed = [trimmed substringToIndex:6000];
@@ -487,10 +543,34 @@ static NSString *IOSDebHumanTool(NSString *name) {
     return [parts componentsJoinedByString:@", "];
 }
 
+- (NSString *)screenSignatureFromResult:(id)result {
+    if (![result isKindOfClass:[NSDictionary class]]) return @"";
+    NSDictionary *dict = (NSDictionary *)result;
+    NSString *bundle = dict[@"frontmost"][@"bundleId"] ?: @"";
+    NSArray *elems = dict[@"elements"];
+    NSUInteger count = [elems isKindOfClass:[NSArray class]] ? elems.count : 0;
+    NSMutableString *ms = [NSMutableString stringWithFormat:@"%@_%lu_", bundle, (unsigned long)count];
+    if ([elems isKindOfClass:[NSArray class]]) {
+        for (NSUInteger i = 0; i < MIN((NSUInteger)8, elems.count); i++) {
+            id el = elems[i];
+            if ([el isKindOfClass:[NSDictionary class]] && el[@"text"]) {
+                [ms appendString:el[@"text"]];
+            }
+        }
+    }
+    return ms;
+}
+
 - (void)finish:(IOSDebAgentEndReason)reason message:(NSString *)message {
     if (!_running) return;
     _running = NO;
     _cancelled = NO;
+    _customStepLimit = 0;
+    _consecutiveSameActionCount = 0;
+    _lastActionName = nil;
+    _lastActionArgs = nil;
+    _stagnantScreenCount = 0;
+    _lastScreenSig = nil;
 
     IOSDebLog(@"[agent] finished reason=%ld steps=%ld tokens=%ld",
               (long)reason, (long)_currentStep, (long)_tokenUsage);

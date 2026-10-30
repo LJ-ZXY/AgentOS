@@ -132,6 +132,17 @@ static NSString *const kPosYKey = @"ui.barY";
     UILabel *_skillEmptyLabel;
     UIButton *_barStopHint;
     IOSDebSkill *_activeSkill;
+
+    // Skill Detail Inspector View
+    UIView *_skillDetailContainer;
+    UILabel *_skillDetailTitle;
+    UILabel *_skillDetailAppLabel;
+    UILabel *_skillDetailStepsLabel;
+    UITextField *_roundsField;
+    UILabel *_roundsBudgetLabel;
+    UIButton *_startRunButton;
+    IOSDebSkill *_inspectingSkill;
+    NSInteger _currentSelectedRounds;
     BOOL _recording;
     NSTimer *_barRevertTimer;
 
@@ -368,6 +379,132 @@ static NSString *const kPosYKey = @"ui.barY";
     _skillEmptyLabel.textColor = [UIColor colorWithWhite:1 alpha:0.35];
     _skillEmptyLabel.hidden = YES;
     [_skillContainer addSubview:_skillEmptyLabel];
+
+    // Skill Detail Inspector Card (covers _panel, hidden by default)
+    _skillDetailContainer = [[UIView alloc] initWithFrame:_panel.bounds];
+    _skillDetailContainer.backgroundColor = [self panelBackground];
+    _skillDetailContainer.layer.cornerRadius = 20;
+    _skillDetailContainer.layer.masksToBounds = YES;
+    _skillDetailContainer.hidden = YES;
+
+    UIButton *detailBackBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    detailBackBtn.frame = CGRectMake(10, 10, 68, 30);
+    [detailBackBtn setTitle:@"‹ 返回" forState:UIControlStateNormal];
+    detailBackBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    [detailBackBtn setTitleColor:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1] forState:UIControlStateNormal];
+    [detailBackBtn addTarget:self action:@selector(closeSkillDetail) forControlEvents:UIControlEventTouchUpInside];
+    [_skillDetailContainer addSubview:detailBackBtn];
+
+    _skillDetailTitle = [[UILabel alloc] initWithFrame:CGRectMake(80, 10, w - 24 - 150, 30)];
+    _skillDetailTitle.textAlignment = NSTextAlignmentCenter;
+    _skillDetailTitle.font = [UIFont boldSystemFontOfSize:15];
+    _skillDetailTitle.textColor = [UIColor whiteColor];
+    [_skillDetailContainer addSubview:_skillDetailTitle];
+
+    UIButton *deleteSkillBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    deleteSkillBtn.frame = CGRectMake(w - 24 - 68, 10, 58, 30);
+    [deleteSkillBtn setTitle:@"删除" forState:UIControlStateNormal];
+    deleteSkillBtn.titleLabel.font = [UIFont systemFontOfSize:13];
+    [deleteSkillBtn setTitleColor:[UIColor colorWithRed:0.898 green:0.329 blue:0.294 alpha:1] forState:UIControlStateNormal];
+    [deleteSkillBtn addTarget:self action:@selector(onDeleteInspectingSkill) forControlEvents:UIControlEventTouchUpInside];
+    [_skillDetailContainer addSubview:deleteSkillBtn];
+
+    UIView *detailDivider1 = [[UIView alloc] initWithFrame:CGRectMake(0, 42, w - 24, 1)];
+    detailDivider1.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    [_skillDetailContainer addSubview:detailDivider1];
+
+    _skillDetailAppLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 46, w - 24 - 32, 18)];
+    _skillDetailAppLabel.font = [UIFont systemFontOfSize:12];
+    _skillDetailAppLabel.textColor = [UIColor colorWithWhite:1 alpha:0.7];
+    [_skillDetailContainer addSubview:_skillDetailAppLabel];
+
+    _skillDetailStepsLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 66, w - 24 - 32, 18)];
+    _skillDetailStepsLabel.font = [UIFont systemFontOfSize:12];
+    _skillDetailStepsLabel.textColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1];
+    [_skillDetailContainer addSubview:_skillDetailStepsLabel];
+
+    UIView *detailDivider2 = [[UIView alloc] initWithFrame:CGRectMake(0, 88, w - 24, 1)];
+    detailDivider2.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    [_skillDetailContainer addSubview:detailDivider2];
+
+    UILabel *roundsSectionTitle = [[UILabel alloc] initWithFrame:CGRectMake(16, 94, w - 24 - 32, 18)];
+    roundsSectionTitle.text = @"计划执行轮次：";
+    roundsSectionTitle.font = [UIFont boldSystemFontOfSize:12];
+    roundsSectionTitle.textColor = [UIColor colorWithWhite:1 alpha:0.6];
+    [_skillDetailContainer addSubview:roundsSectionTitle];
+
+    UIButton *minus10Btn = [UIButton buttonWithType:UIButtonTypeSystem];
+    minus10Btn.frame = CGRectMake(24, 116, 68, 34);
+    [minus10Btn setTitle:@"- 10" forState:UIControlStateNormal];
+    minus10Btn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    [minus10Btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    minus10Btn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12];
+    minus10Btn.layer.cornerRadius = 10;
+    [minus10Btn addTarget:self action:@selector(onRoundsMinus10) forControlEvents:UIControlEventTouchUpInside];
+    [_skillDetailContainer addSubview:minus10Btn];
+
+    _roundsField = [[UITextField alloc] initWithFrame:CGRectMake(24 + 68 + 12, 116, w - 24 - 48 - 136 - 24, 34)];
+    _roundsField.font = [UIFont boldSystemFontOfSize:20];
+    _roundsField.textColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1];
+    _roundsField.textAlignment = NSTextAlignmentCenter;
+    _roundsField.keyboardType = UIKeyboardTypeNumberPad;
+    _roundsField.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    _roundsField.layer.cornerRadius = 10;
+    _roundsField.layer.borderWidth = 1;
+    _roundsField.layer.borderColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.40].CGColor;
+    [_roundsField addTarget:self action:@selector(onRoundsFieldChanged:) forControlEvents:UIControlEventEditingChanged];
+    [_skillDetailContainer addSubview:_roundsField];
+
+    UIButton *plus10Btn = [UIButton buttonWithType:UIButtonTypeSystem];
+    plus10Btn.frame = CGRectMake(w - 24 - 24 - 68, 116, 68, 34);
+    [plus10Btn setTitle:@"+ 10" forState:UIControlStateNormal];
+    plus10Btn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    [plus10Btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    plus10Btn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12];
+    plus10Btn.layer.cornerRadius = 10;
+    [plus10Btn addTarget:self action:@selector(onRoundsPlus10) forControlEvents:UIControlEventTouchUpInside];
+    [_skillDetailContainer addSubview:plus10Btn];
+
+    _roundsBudgetLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 154, w - 24 - 32, 18)];
+    _roundsBudgetLabel.textAlignment = NSTextAlignmentCenter;
+    _roundsBudgetLabel.font = [UIFont systemFontOfSize:11];
+    _roundsBudgetLabel.textColor = [UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:0.9];
+    [_skillDetailContainer addSubview:_roundsBudgetLabel];
+
+    UIView *detailDivider3 = [[UIView alloc] initWithFrame:CGRectMake(0, 176, w - 24, 1)];
+    detailDivider3.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    [_skillDetailContainer addSubview:detailDivider3];
+
+    _startRunButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _startRunButton.frame = CGRectMake(20, 184, w - 24 - 40, 40);
+    _startRunButton.titleLabel.font = [UIFont boldSystemFontOfSize:15];
+    [_startRunButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    _startRunButton.backgroundColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.95];
+    _startRunButton.layer.cornerRadius = 12;
+    [_startRunButton addTarget:self action:@selector(onStartCustomRounds) forControlEvents:UIControlEventTouchUpInside];
+    [_skillDetailContainer addSubview:_startRunButton];
+
+    UIButton *singleTestBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    singleTestBtn.frame = CGRectMake(20, 232, w - 24 - 40, 34);
+    [singleTestBtn setTitle:@"⚡ 单次测试 (1 轮)" forState:UIControlStateNormal];
+    singleTestBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+    [singleTestBtn setTitleColor:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1] forState:UIControlStateNormal];
+    singleTestBtn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    singleTestBtn.layer.borderWidth = 1;
+    singleTestBtn.layer.borderColor = [UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:0.35].CGColor;
+    singleTestBtn.layer.cornerRadius = 10;
+    [singleTestBtn addTarget:self action:@selector(onStartSingleTest) forControlEvents:UIControlEventTouchUpInside];
+    [_skillDetailContainer addSubview:singleTestBtn];
+
+    UIButton *exportBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    exportBtn.frame = CGRectMake(20, 274, w - 24 - 40, 30);
+    [exportBtn setTitle:@"📋 导出并复制口令" forState:UIControlStateNormal];
+    exportBtn.titleLabel.font = [UIFont systemFontOfSize:12];
+    [exportBtn setTitleColor:[UIColor colorWithWhite:1 alpha:0.6] forState:UIControlStateNormal];
+    [exportBtn addTarget:self action:@selector(onExportSkillDetail) forControlEvents:UIControlEventTouchUpInside];
+    [_skillDetailContainer addSubview:exportBtn];
+
+    [_panel addSubview:_skillDetailContainer];
 
     [_panel addSubview:_skillContainer];
 
@@ -780,6 +917,7 @@ static NSString *const kPosYKey = @"ui.barY";
 
 - (void)openSkillLibrary {
     [self reloadSkillChips];
+    [_panel bringSubviewToFront:_skillContainer];
     _skillContainer.alpha = 0.0;
     _skillContainer.hidden = NO;
     [UIView animateWithDuration:0.25 animations:^{
@@ -790,8 +928,10 @@ static NSString *const kPosYKey = @"ui.barY";
 - (void)closeSkillLibrary {
     [UIView animateWithDuration:0.2 animations:^{
         self->_skillContainer.alpha = 0.0;
+        self->_skillDetailContainer.alpha = 0.0;
     } completion:^(__unused BOOL finished) {
         self->_skillContainer.hidden = YES;
+        self->_skillDetailContainer.hidden = YES;
         [self updateSkillLibButtonTitle];
     }];
 }
@@ -817,82 +957,133 @@ static NSString *const kPosYKey = @"ui.barY";
 }
 
 - (void)presentSkillInspectorForSkill:(IOSDebSkill *)skill {
-    NSMutableString *body = [NSMutableString string];
+    [self openSkillDetail:skill];
+}
+
+- (void)openSkillDetail:(IOSDebSkill *)skill {
+    if (!skill) return;
+    _inspectingSkill = skill;
+    _currentSelectedRounds = 10;
+    _skillDetailTitle.text = skill.name ?: @"技能详情";
+
     NSInteger pct = (skill.runCount > 0) ? (NSInteger)llround(100.0 * skill.successCount / skill.runCount) : 0;
-    [body appendFormat:@"版本：v%ld · 运行 %ld 次 · 成功率 %ld%%\n",
-             (long)skill.version, (long)skill.runCount, (long)pct];
-    if (skill.appName.length || skill.appBundleID.length) {
-        [body appendFormat:@"目标应用：%@%@\n\n",
-                 skill.appName ?: @"",
-                 skill.appBundleID.length ? [NSString stringWithFormat:@"（%@）", skill.appBundleID] : @""];
+    NSString *app = skill.appName.length ? skill.appName : (skill.appBundleID.length ? skill.appBundleID : @"通用应用");
+    _skillDetailAppLabel.text = [NSString stringWithFormat:@"目标：%@ · v%ld · 成功率 %ld%% (%ld次)",
+                                 app, (long)skill.version, (long)pct, (long)skill.runCount];
+
+    _skillDetailStepsLabel.text = [NSString stringWithFormat:@"步骤：进入 %lu 步 · 循环体 %lu 步/轮",
+                                   (unsigned long)skill.entrySteps.count,
+                                   (unsigned long)skill.loopSteps.count];
+
+    [self updateRoundsDisplay];
+
+    [_panel bringSubviewToFront:_skillDetailContainer];
+    _skillDetailContainer.alpha = 0.0;
+    _skillDetailContainer.hidden = NO;
+    [UIView animateWithDuration:0.25 animations:^{
+        self->_skillDetailContainer.alpha = 1.0;
+    }];
+}
+
+- (void)closeSkillDetail {
+    [_roundsField resignFirstResponder];
+    [_panel bringSubviewToFront:_skillContainer];
+    [UIView animateWithDuration:0.2 animations:^{
+        self->_skillDetailContainer.alpha = 0.0;
+    } completion:^(__unused BOOL finished) {
+        self->_skillDetailContainer.hidden = YES;
+    }];
+}
+
+- (void)updateRoundsDisplay {
+    if (_currentSelectedRounds < 1) _currentSelectedRounds = 1;
+    if (_currentSelectedRounds > 500) _currentSelectedRounds = 500;
+
+    _roundsField.text = [NSString stringWithFormat:@"%ld", (long)_currentSelectedRounds];
+
+    NSInteger stepsPerRound = _inspectingSkill.loopSteps.count > 0 ? _inspectingSkill.loopSteps.count : 2;
+    NSInteger estSteps = _currentSelectedRounds * stepsPerRound;
+    _roundsBudgetLabel.text = [NSString stringWithFormat:@"💡 预估步数：约 %ld 步 (系统已自动分配安全配额)", (long)estSteps];
+
+    [_startRunButton setTitle:[NSString stringWithFormat:@"▶ 开始执行 (%ld 轮)", (long)_currentSelectedRounds]
+                     forState:UIControlStateNormal];
+}
+
+- (void)onRoundsMinus10 {
+    [_roundsField resignFirstResponder];
+    if (_currentSelectedRounds <= 10) {
+        _currentSelectedRounds = 1;
+    } else {
+        _currentSelectedRounds -= 10;
     }
-    if (skill.entrySteps.count) {
-        [body appendString:@"【进入步骤】\n"];
-        for (NSUInteger i = 0; i < MIN(skill.entrySteps.count, 2); i++) {
-            [body appendFormat:@" · %@\n", skill.entrySteps[i]];
+    [self updateRoundsDisplay];
+}
+
+- (void)onRoundsPlus10 {
+    [_roundsField resignFirstResponder];
+    if (_currentSelectedRounds == 1) {
+        _currentSelectedRounds = 10;
+    } else {
+        _currentSelectedRounds += 10;
+    }
+    [self updateRoundsDisplay];
+}
+
+- (void)onRoundsFieldChanged:(UITextField *)tf {
+    NSInteger val = [tf.text integerValue];
+    if (val > 0) {
+        _currentSelectedRounds = val;
+        [self updateRoundsDisplay];
+    }
+}
+
+- (void)onStartCustomRounds {
+    [_roundsField resignFirstResponder];
+    [self closeSkillDetail];
+    [self runSkill:_inspectingSkill rounds:_currentSelectedRounds];
+}
+
+- (void)onStartSingleTest {
+    [_roundsField resignFirstResponder];
+    [self closeSkillDetail];
+    [self runSkill:_inspectingSkill rounds:1];
+}
+
+- (void)onDeleteInspectingSkill {
+    [_roundsField resignFirstResponder];
+    if (!_inspectingSkill) return;
+    IOSDebSkill *s = _inspectingSkill;
+    [[IOSDebSkillStore shared] removeSkill:s];
+    [self closeSkillDetail];
+    [self reloadSkillChips];
+    [self setStatus:[NSString stringWithFormat:@"已删除「%@」", s.name] color:[UIColor orangeColor]];
+}
+
+- (void)onExportSkillDetail {
+    if (!_inspectingSkill) return;
+    NSString *json = [_inspectingSkill toJSONString];
+    if (json.length) {
+        [UIPasteboard generalPasteboard].string = json;
+        [self setStatus:[NSString stringWithFormat:@"已复制「%@」口令到剪贴板", _inspectingSkill.name]
+                  color:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1]];
+        if (@available(iOS 10.0, *)) {
+            UINotificationFeedbackGenerator *gen = [[UINotificationFeedbackGenerator alloc] init];
+            [gen prepare];
+            [gen notificationOccurred:UINotificationFeedbackTypeSuccess];
         }
-        if (skill.entrySteps.count > 2) [body appendString:@" · ...\n"];
-        [body appendString:@"\n"];
     }
-    if (skill.loopSteps.count) {
-        [body appendString:@"【循环核心】\n"];
-        for (NSUInteger i = 0; i < MIN(skill.loopSteps.count, 2); i++) {
-            [body appendFormat:@" · %@\n", skill.loopSteps[i]];
-        }
-        if (skill.loopSteps.count > 2) [body appendString:@" · ...\n"];
-        [body appendString:@"\n"];
-    }
-    if (skill.stopCondition.length) {
-        [body appendFormat:@"【停止条件】\n%@\n", skill.stopCondition];
-    }
-
-    UIAlertController *sheet =
-        [UIAlertController alertControllerWithTitle:skill.name
-                                            message:body
-                                     preferredStyle:UIAlertControllerStyleActionSheet];
-
-    __weak typeof(self) weakSelf = self;
-    [sheet addAction:[UIAlertAction actionWithTitle:@"执行 1 轮（单次测试）"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *a) {
-        [weakSelf runSkill:skill rounds:1];
-    }]];
-
-    [sheet addAction:[UIAlertAction actionWithTitle:@"执行 10 轮（标准循环）"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *a) {
-        [weakSelf runSkill:skill rounds:10];
-    }]];
-
-    [sheet addAction:[UIAlertAction actionWithTitle:@"导出并复制口令"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *a) {
-        NSString *json = [skill toJSONString];
-        if (json.length) {
-            [UIPasteboard generalPasteboard].string = json;
-            [weakSelf setStatus:[NSString stringWithFormat:@"已复制「%@」口令到剪贴板", skill.name]
-                          color:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1]];
-        }
-    }]];
-
-    [sheet addAction:[UIAlertAction actionWithTitle:@"删除技能"
-                                              style:UIAlertActionStyleDestructive
-                                            handler:^(__unused UIAlertAction *a) {
-        [[IOSDebSkillStore shared] removeSkill:skill];
-        [weakSelf reloadSkillChips];
-        [weakSelf setStatus:[NSString stringWithFormat:@"已删除「%@」", skill.name]
-                      color:[UIColor orangeColor]];
-    }]];
-
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消"
-                                              style:UIAlertActionStyleCancel
-                                            handler:nil]];
-
-    [[self topViewController] presentViewController:sheet animated:YES completion:nil];
 }
 
 - (void)runSkill:(IOSDebSkill *)skill rounds:(NSInteger)rounds {
     if (!skill || [IOSDebAgent shared].isRunning) return;
+
+    if (rounds < 1) rounds = 1;
+    if (rounds > 500) rounds = 500;
+
+    NSInteger stepsPerRound = skill.loopSteps.count > 0 ? skill.loopSteps.count : 2;
+    NSInteger entryCount = skill.entrySteps.count > 0 ? skill.entrySteps.count : 1;
+    NSInteger dynamicBudget = entryCount + (NSInteger)llround(rounds * stepsPerRound * 1.3) + 15;
+    if (dynamicBudget < 30) dynamicBudget = 30;
 
     _activeSkill = skill;
     [_steps removeAllObjects];
@@ -902,9 +1093,10 @@ static NSString *const kPosYKey = @"ui.barY";
               color:[UIColor colorWithRed:0.431 green:0.659 blue:1 alpha:1]];
 
     NSString *instruction = [skill instructionForRunCount:rounds];
-    IOSDebLog(@"[skill] run %@ v%ld rounds=%ld",
-              skill.name, (long)skill.version, (long)rounds);
-    [[IOSDebAgent shared] run:instruction];
+    IOSDebLog(@"[skill] run %@ v%ld rounds=%ld dynamicBudget=%ld",
+              skill.name, (long)skill.version, (long)rounds, (long)dynamicBudget);
+    [[IOSDebAgent shared] run:instruction withStepLimit:dynamicBudget];
+    _skillDetailContainer.hidden = YES;
     _skillContainer.hidden = YES;
     [self collapse];
 }
@@ -942,28 +1134,8 @@ static NSString *const kPosYKey = @"ui.barY";
     if (g.state != UIGestureRecognizerStateBegan) return;
     UIButton *chip = (UIButton *)g.view;
     IOSDebSkill *skill = objc_getAssociatedObject(chip, "iosdeb.skill");
-    if (!skill) return;
-
-    UIAlertController *sheet =
-        [UIAlertController alertControllerWithTitle:skill.name
-                                            message:[NSString stringWithFormat:
-                                                     @"v%ld · 用 %ld 次 · 成功 %ld 次",
-                                                     (long)skill.version,
-                                                     (long)skill.runCount,
-                                                     (long)skill.successCount]
-                                     preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"删除技能"
-                                              style:UIAlertActionStyleDestructive
-                                            handler:^(__unused UIAlertAction *a) {
-        [[IOSDebSkillStore shared] removeSkill:skill];
-        [self reloadSkillChips];
-        [self setStatus:[NSString stringWithFormat:@"已删除「%@」", skill.name]
-                  color:[UIColor orangeColor]];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消"
-                                              style:UIAlertActionStyleCancel
-                                            handler:nil]];
-    [[self topViewController] presentViewController:sheet animated:YES completion:nil];
+    if (!skill || [IOSDebAgent shared].isRunning) return;
+    [self openSkillDetail:skill];
 }
 
 - (UIViewController *)topViewController {

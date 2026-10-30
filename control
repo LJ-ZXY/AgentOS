@@ -1,7 +1,7 @@
 Package: com.witchan.ios-deb
 Name: AgentOS
 Depends: mobilesubstrate, preferenceloader
-Version: 1.2.2
+Version: 1.3.0
 Architecture: iphoneos-arm
 Description: Floating AI panel for iPhone. Drives the on-device ios-mcp tools via loopback so the phone works without a computer.
 Maintainer: AgentOS Contributors

@@ -33,8 +33,10 @@ typedef NS_ENUM(NSInteger, IOSDebAgentEndReason) {
 @property (nonatomic, readonly) NSInteger currentStep;
 @property (nonatomic, readonly) NSInteger stepLimit;
 @property (nonatomic, readonly) NSInteger tokenUsage;
+@property (nonatomic, assign) NSInteger customStepLimit;
 
 - (void)run:(NSString *)instruction;
+- (void)run:(NSString *)instruction withStepLimit:(NSInteger)limit;
 - (void)stop;
 
 /// Posted on the main queue: object is IOSDebAgent, userInfo carries
