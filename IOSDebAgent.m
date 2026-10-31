@@ -1,6 +1,8 @@
 #import "IOSDebAgent.h"
+#import <UIKit/UIKit.h>
 #import "IOSDebLLMClient.h"
 #import "IOSDebMCPClient.h"
+#import "IOSDebSkill.h"
 #import "IOSDebStore.h"
 #import "IOSDebLog.h"
 
@@ -74,6 +76,13 @@ static NSArray<NSString *> *IOSDebSafeTools(void) {
         @"get_syslog",
         @"get_crash_logs",
         @"read_crash_log",
+        // --- meta-skill management (AgentOS built-in) ---
+        @"list_skills",
+        @"get_skill_detail",
+        @"update_skill",
+        @"create_skill",
+        @"delete_skill",
+        @"export_skill_to_clipboard",
     ];
 }
 
@@ -133,6 +142,12 @@ static NSString *IOSDebHumanTool(NSString *name) {
         @"write_file": @"写入文件",
         @"install_app": @"安装应用",
         @"uninstall_app": @"卸载应用",
+        @"list_skills": @"查看技能库",
+        @"get_skill_detail": @"读取技能详情",
+        @"update_skill": @"修改技能配方",
+        @"create_skill": @"创建新技能",
+        @"delete_skill": @"删除技能",
+        @"export_skill_to_clipboard": @"导出技能口令",
     };
     return map[name] ?: name;
 }
@@ -208,38 +223,369 @@ static NSString *IOSDebHumanTool(NSString *name) {
     NSString *dangerNote = s.allowDangerousTools
         ? @"已开启高危操作：run_command / write_file / install_app / uninstall_app 可用。执行前必须先说明将要做什么，得到用户确认后才调用。\n"
         : @"高危操作未开启：不要尝试安装、卸载、执行 shell 或写文件，这些工具不会出现在你的工具列表里。\n";
+
+    NSArray<IOSDebSkill *> *skills = [[IOSDebSkillStore shared] allSkills];
+    NSMutableString *skillSummary = [NSMutableString string];
+    if (skills.count == 0) {
+        [skillSummary appendString:@"当前本地技能库为空（0 个技能）。\n"];
+    } else {
+        [skillSummary appendFormat:@"当前本地技能库已保存 %lu 个技能：\n", (unsigned long)skills.count];
+        for (NSUInteger i = 0; i < MIN((NSUInteger)15, skills.count); i++) {
+            IOSDebSkill *sk = skills[i];
+            [skillSummary appendFormat:@"  %lu. 「%@」(id=%@, v%ld, 应用=%@, 进入=%lu步, 循环=%lu步/轮, 停止条件=%@)\n",
+             (unsigned long)(i + 1),
+             sk.name ?: @"",
+             sk.skillID ?: @"",
+             (long)sk.version,
+             sk.appName.length ? sk.appName : (sk.appBundleID.length ? sk.appBundleID : @"通用"),
+             (unsigned long)sk.entrySteps.count,
+             (unsigned long)sk.loopSteps.count,
+             sk.stopCondition.length ? sk.stopCondition : @"未设置"];
+        }
+    }
+
     return [NSString stringWithFormat:
-        @"你是一台 iPhone 上的操作助手。你必须通过调用工具来完成任务，不要凭空猜测屏幕内容。\n"
-        @"规则：\n"
-        @"1. 每次只做一步，先观察（describe_screen / get_ui_elements / screenshot），再动手。\n"
-        @"2. 优先用 tap_element 按文本点击；找不到文本时用 tap_screen 坐标。\n"
-        @"3. 如果不确定，就再观察一次，不要连续盲点。\n"
-        @"4. 最多 %ld 步。做完或无法继续时，停止调用工具并简短说明结果。\n"
-        @"5. 若任务涉及付费、删除、发送消息，先说明再执行。\n"
-        @"6. 视觉文字优先用 get_ui_elements / describe_screen 的无障碍树；只有无障碍树拿不到文字（例如游戏画面）才用 ocr_screen。\n"
-        @"7. ocr_screen 不要传 engine（本机 vision 引擎会卡死）；需要局部识别才传 region。\n"
-        @"8. 需要启动某个 App 但不知道 bundle_id 时，先调用 list_apps 查，不要猜。系统自带 App（备忘录/设置/时钟等）必须用 type=all，type=user 只返回第三方 App。同名 App 可能有多条（例如「设置」会出现 4 次），要按 bundleId 选，常见值：com.apple.mobilenotes、com.apple.Preferences、com.apple.mobiletimer、com.apple.reminders。\n"
-        @"9. 输入完成后需要确认/换行/删除时用 press_key（enter / delete / space / tab）。\n"
-        @"10. 跨 App 传较长文字时，用 set_clipboard 写入再长按粘贴；读取用户剪贴板用 get_clipboard。\n"
-        @"11. 深链跳转（打开某 App 的某个页面）优先用 open_url，比模拟点击稳。\n"
-        @"12. 任务结束需要释放资源时可 kill_app；不要随便杀掉正在用的应用。\n"
-        @"13. 排查问题时可 get_syslog / get_crash_logs / read_crash_log / get_device_info，但不要把它们当常规步骤。\n"
+        @"你是 AgentOS —— 运行在 iPhone 端侧的全能智能体操作系统。你拥有四大能力平面，必须根据用户意图精准路由调用工具：\n"
+        @"\n"
+        @"【平面一：技能自管理中枢（Meta-Skill Plane）】\n"
         @"%@"
-        @"屏幕坐标单位是 point，直接使用工具返回的坐标，不要换算。",
-        (long)s.stepLimit, dangerNote];
+        @"- 工具：list_skills / get_skill_detail / update_skill / create_skill / delete_skill / export_skill_to_clipboard。\n"
+        @"- 当用户要求查看、修改、创建、删除或导出本地技能（例如“把英语技能的停止条件改成 50 题”、“帮我把备忘录技能改名”、“把英语技能复制到剪贴板”、“创建一个新技能”）时，直接调用这些技能管理工具完成持久化操作，严禁调用 describe_screen 去屏幕上盲找同名按钮！\n"
+        @"\n"
+        @"【平面二：系统环境与感知控制（System OS Plane）】\n"
+        @"- 工具：get_device_info（电量/机型/系统版本/存储/内存/越狱状态）、get_clipboard / set_clipboard（读写剪贴板）、get_brightness / set_brightness（亮度 0.0~1.0）、get_volume / set_volume（音量 0.0~1.0）、list_apps / list_running_apps / get_app_info / launch_app / kill_app / open_url（应用生命周期与深链）、list_dir / read_file（只读文件探查）。\n"
+        @"- 当用户询问设备状态、读取或写入剪贴板、调节音量亮度、查询或启动应用、读取本地文件时，直接调用对应的系统级工具一步到位，无需先调用 describe_screen 看屏幕。\n"
+        @"- 启动 App 不知道 bundle_id 时先调用 list_apps（系统自带 App 用 type=all，常见值：com.apple.mobilenotes、com.apple.Preferences、com.apple.mobiletimer、com.apple.reminders）。\n"
+        @"\n"
+        @"【平面三：屏幕感知与 UI 驱动（Perception & UI Plane）】\n"
+        @"- 当任务需要实际操控 App 界面时：每次只做一步，先观察（describe_screen / get_ui_elements / screenshot），再行动。\n"
+        @"- 优先用 tap_element 按可见文本点击；找不到文本再用 tap_screen 坐标（坐标单位是 point，无需换算）。\n"
+        @"- 视觉文字优先用 describe_screen / get_ui_elements；只有无障碍树拿不到文字（如游戏/画布）才用 ocr_screen（不要传 engine 参数）。\n"
+        @"- 输入完成后需确认/换行/删除时用 press_key（enter / delete / space / tab）。\n"
+        @"\n"
+        @"【平面四：诊断与自愈分析（Diagnostics Plane）】\n"
+        @"- 工具：get_syslog / get_crash_logs / read_crash_log。排查闪退、异常或失败原因时按需调用。\n"
+        @"\n"
+        @"【安全与边界】\n"
+        @"- 本次任务最多 %ld 步。完成后停止调用工具并简短清晰地汇报结果。\n"
+        @"- 若任务涉及付费、转账、发送外部消息，先向用户说明再执行。\n"
+        @"%@",
+        skillSummary, (long)self.stepLimit, dangerNote];
+}
+
+- (NSArray<NSDictionary *> *)localSkillToolSchemas {
+    return @[
+        @{
+            @"type": @"function",
+            @"function": @{
+                @"name": @"list_skills",
+                @"description": @"列出本地 AgentOS 技能库中所有已保存的技能配方（包含 skill_id、名称、目标应用、版本号、循环步数、停止条件与成功率）。",
+                @"parameters": @{
+                    @"type": @"object",
+                    @"properties": @{}
+                }
+            }
+        },
+        @{
+            @"type": @"function",
+            @"function": @{
+                @"name": @"get_skill_detail",
+                @"description": @"读取本地技能库中指定技能的完整结构化配方（entrySteps、startCondition、loopSteps、roundCheck、stopCondition、exceptionRules）。支持按 skill_id 或技能名称关键词匹配。",
+                @"parameters": @{
+                    @"type": @"object",
+                    @"properties": @{
+                        @"query": @{
+                            @"type": @"string",
+                            @"description": @"技能的 skill_id 或名称关键词（如「英语」、「备忘录」）"
+                        }
+                    },
+                    @"required": @[@"query"]
+                }
+            }
+        },
+        @{
+            @"type": @"function",
+            @"function": @{
+                @"name": @"update_skill",
+                @"description": @"直接修改本地技能库中已有技能的配方（如修改名称、循环步骤、停止条件、进入步骤、目标应用等），自动保存落盘并递增版本号。无需操作屏幕 UI，直接更新本地技能库。",
+                @"parameters": @{
+                    @"type": @"object",
+                    @"properties": @{
+                        @"query": @{
+                            @"type": @"string",
+                            @"description": @"要修改的目标技能 skill_id 或现有名称关键词（如「英语」、「备忘录」）"
+                        },
+                        @"new_name": @{
+                            @"type": @"string",
+                            @"description": @"新的技能名称（不修改则不传）"
+                        },
+                        @"summary": @{
+                            @"type": @"string",
+                            @"description": @"更新后的技能简介（不修改则不传）"
+                        },
+                        @"app_name": @{
+                            @"type": @"string",
+                            @"description": @"更新后的目标应用名称（不修改则不传）"
+                        },
+                        @"app_bundle_id": @{
+                            @"type": @"string",
+                            @"description": @"更新后的目标应用 Bundle ID（不修改则不传）"
+                        },
+                        @"entry_steps": @{
+                            @"type": @"array",
+                            @"items": @{@"type": @"string"},
+                            @"description": @"更新后的进入步骤列表（不修改则不传）"
+                        },
+                        @"start_condition": @{
+                            @"type": @"string",
+                            @"description": @"更新后的就位判断条件（不修改则不传）"
+                        },
+                        @"loop_steps": @{
+                            @"type": @"array",
+                            @"items": @{@"type": @"string"},
+                            @"description": @"更新后的每轮循环核心步骤列表（不修改则不传）"
+                        },
+                        @"round_check": @{
+                            @"type": @"string",
+                            @"description": @"更新后的单轮完成判定条件（不修改则不传）"
+                        },
+                        @"stop_condition": @{
+                            @"type": @"string",
+                            @"description": @"更新后的停止条件（不修改则不传）"
+                        },
+                        @"exception_rules": @{
+                            @"type": @"array",
+                            @"items": @{@"type": @"string"},
+                            @"description": @"更新后的异常处理规则列表（不修改则不传）"
+                        }
+                    },
+                    @"required": @[@"query"]
+                }
+            }
+        },
+        @{
+            @"type": @"function",
+            @"function": @{
+                @"name": @"create_skill",
+                @"description": @"在本地 AgentOS 技能库中直接创建一个新的结构化技能配方并保存落盘。",
+                @"parameters": @{
+                    @"type": @"object",
+                    @"properties": @{
+                        @"name": @{@"type": @"string", @"description": @"新技能名称"},
+                        @"app_name": @{@"type": @"string", @"description": @"目标应用名称（如「微信」、「备忘录」）"},
+                        @"app_bundle_id": @{@"type": @"string", @"description": @"目标应用 Bundle ID（如 com.tencent.xin、com.apple.mobilenotes）"},
+                        @"summary": @{@"type": @"string", @"description": @"技能摘要"},
+                        @"entry_steps": @{@"type": @"array", @"items": @{@"type": @"string"}, @"description": @"进入目标页面的步骤列表"},
+                        @"start_condition": @{@"type": @"string", @"description": @"开始循环前的就位判断条件"},
+                        @"loop_steps": @{@"type": @"array", @"items": @{@"type": @"string"}, @"description": @"每轮循环执行的核心步骤列表（使用可见文本描述）"},
+                        @"round_check": @{@"type": @"string", @"description": @"单轮完成判定"},
+                        @"stop_condition": @{@"type": @"string", @"description": @"停止条件"},
+                        @"exception_rules": @{@"type": @"array", @"items": @{@"type": @"string"}, @"description": @"异常处理规则列表"}
+                    },
+                    @"required": @[@"name", @"loop_steps", @"stop_condition"]
+                }
+            }
+        },
+        @{
+            @"type": @"function",
+            @"function": @{
+                @"name": @"delete_skill",
+                @"description": @"从本地 AgentOS 技能库中删除指定的技能（仅在用户明确要求删除某技能时调用）。",
+                @"parameters": @{
+                    @"type": @"object",
+                    @"properties": @{
+                        @"query": @{@"type": @"string", @"description": @"要删除的技能 skill_id 或名称关键词"}
+                    },
+                    @"required": @[@"query"]
+                }
+            }
+        },
+        @{
+            @"type": @"function",
+            @"function": @{
+                @"name": @"export_skill_to_clipboard",
+                @"description": @"将本地技能库中的指定技能导出为 JSON 口令并直接写入系统剪贴板，供用户粘贴分享。",
+                @"parameters": @{
+                    @"type": @"object",
+                    @"properties": @{
+                        @"query": @{@"type": @"string", @"description": @"要导出的技能 skill_id 或名称关键词"}
+                    },
+                    @"required": @[@"query"]
+                }
+            }
+        }
+    ];
+}
+
+- (BOOL)isLocalSkillTool:(NSString *)name {
+    if (!name.length) return NO;
+    return [@[
+        @"list_skills",
+        @"get_skill_detail",
+        @"update_skill",
+        @"create_skill",
+        @"delete_skill",
+        @"export_skill_to_clipboard"
+    ] containsObject:name];
+}
+
+- (NSDictionary *)executeLocalSkillTool:(NSString *)name
+                                   args:(NSDictionary *)args
+                                  error:(NSString **)outError {
+    IOSDebSkillStore *store = [IOSDebSkillStore shared];
+    if ([name isEqualToString:@"list_skills"]) {
+        NSArray<IOSDebSkill *> *all = [store allSkills];
+        NSMutableArray *items = [NSMutableArray arrayWithCapacity:all.count];
+        for (IOSDebSkill *s in all) {
+            [items addObject:@{
+                @"skill_id": s.skillID ?: @"",
+                @"name": s.name ?: @"",
+                @"app_name": s.appName ?: @"",
+                @"app_bundle_id": s.appBundleID ?: @"",
+                @"version": @(s.version),
+                @"run_count": @(s.runCount),
+                @"success_count": @(s.successCount),
+                @"entry_steps": s.entrySteps ?: @[],
+                @"loop_steps": s.loopSteps ?: @[],
+                @"stop_condition": s.stopCondition ?: @""
+            }];
+        }
+        return @{@"count": @(items.count), @"skills": items};
+    }
+
+    if ([name isEqualToString:@"get_skill_detail"]) {
+        NSString *query = [args[@"query"] isKindOfClass:[NSString class]] ? args[@"query"] : @"";
+        IOSDebSkill *skill = [store skillMatchingQuery:query];
+        if (!skill) {
+            if (outError) *outError = [NSString stringWithFormat:@"未找到匹配「%@」的技能", query];
+            return nil;
+        }
+        return [skill dictionaryValue];
+    }
+
+    if ([name isEqualToString:@"update_skill"]) {
+        NSString *query = [args[@"query"] isKindOfClass:[NSString class]] ? args[@"query"] : @"";
+        IOSDebSkill *skill = [store skillMatchingQuery:query];
+        if (!skill) {
+            if (outError) *outError = [NSString stringWithFormat:@"未找到匹配「%@」的技能，请先用 list_skills 查看", query];
+            return nil;
+        }
+        if ([args[@"new_name"] isKindOfClass:[NSString class]] && [args[@"new_name"] length] > 0) {
+            skill.name = args[@"new_name"];
+        }
+        if ([args[@"summary"] isKindOfClass:[NSString class]]) {
+            skill.summary = args[@"summary"];
+        }
+        if ([args[@"app_name"] isKindOfClass:[NSString class]]) {
+            skill.appName = args[@"app_name"];
+        }
+        if ([args[@"app_bundle_id"] isKindOfClass:[NSString class]]) {
+            skill.appBundleID = args[@"app_bundle_id"];
+        }
+        if ([args[@"entry_steps"] isKindOfClass:[NSArray class]]) {
+            skill.entrySteps = args[@"entry_steps"];
+        }
+        if ([args[@"start_condition"] isKindOfClass:[NSString class]]) {
+            skill.startCondition = args[@"start_condition"];
+        }
+        if ([args[@"loop_steps"] isKindOfClass:[NSArray class]] && [args[@"loop_steps"] count] > 0) {
+            skill.loopSteps = args[@"loop_steps"];
+        }
+        if ([args[@"round_check"] isKindOfClass:[NSString class]]) {
+            skill.roundCheck = args[@"round_check"];
+        }
+        if ([args[@"stop_condition"] isKindOfClass:[NSString class]]) {
+            skill.stopCondition = args[@"stop_condition"];
+        }
+        if ([args[@"exception_rules"] isKindOfClass:[NSArray class]]) {
+            skill.exceptionRules = args[@"exception_rules"];
+        }
+        IOSDebSkill *saved = [store save:skill];
+        return @{
+            @"ok": @YES,
+            @"message": [NSString stringWithFormat:@"已更新技能「%@」并升级至 v%ld", saved.name, (long)saved.version],
+            @"skill": [saved dictionaryValue]
+        };
+    }
+
+    if ([name isEqualToString:@"create_skill"]) {
+        NSString *skillName = [args[@"name"] isKindOfClass:[NSString class]] ? args[@"name"] : @"";
+        if (skillName.length == 0) {
+            if (outError) *outError = @"创建技能必须提供 name";
+            return nil;
+        }
+        IOSDebSkill *skill = [[IOSDebSkill alloc] init];
+        skill.name = skillName;
+        if ([args[@"app_name"] isKindOfClass:[NSString class]]) skill.appName = args[@"app_name"];
+        if ([args[@"app_bundle_id"] isKindOfClass:[NSString class]]) skill.appBundleID = args[@"app_bundle_id"];
+        if ([args[@"summary"] isKindOfClass:[NSString class]]) skill.summary = args[@"summary"];
+        if ([args[@"entry_steps"] isKindOfClass:[NSArray class]]) skill.entrySteps = args[@"entry_steps"];
+        if ([args[@"start_condition"] isKindOfClass:[NSString class]]) skill.startCondition = args[@"start_condition"];
+        if ([args[@"loop_steps"] isKindOfClass:[NSArray class]]) skill.loopSteps = args[@"loop_steps"];
+        if ([args[@"round_check"] isKindOfClass:[NSString class]]) skill.roundCheck = args[@"round_check"];
+        if ([args[@"stop_condition"] isKindOfClass:[NSString class]]) skill.stopCondition = args[@"stop_condition"];
+        if ([args[@"exception_rules"] isKindOfClass:[NSArray class]]) skill.exceptionRules = args[@"exception_rules"];
+        IOSDebSkill *saved = [store save:skill];
+        return @{
+            @"ok": @YES,
+            @"message": [NSString stringWithFormat:@"已创建新技能「%@」(v%ld)", saved.name, (long)saved.version],
+            @"skill": [saved dictionaryValue]
+        };
+    }
+
+    if ([name isEqualToString:@"delete_skill"]) {
+        NSString *query = [args[@"query"] isKindOfClass:[NSString class]] ? args[@"query"] : @"";
+        IOSDebSkill *skill = [store skillMatchingQuery:query];
+        if (!skill) {
+            if (outError) *outError = [NSString stringWithFormat:@"未找到匹配「%@」的技能", query];
+            return nil;
+        }
+        NSString *deletedName = [skill.name copy];
+        NSString *deletedID = [skill.skillID copy];
+        [store removeSkill:skill];
+        return @{
+            @"ok": @YES,
+            @"deleted_name": deletedName ?: @"",
+            @"skill_id": deletedID ?: @""
+        };
+    }
+
+    if ([name isEqualToString:@"export_skill_to_clipboard"]) {
+        NSString *query = [args[@"query"] isKindOfClass:[NSString class]] ? args[@"query"] : @"";
+        IOSDebSkill *skill = [store skillMatchingQuery:query];
+        if (!skill) {
+            if (outError) *outError = [NSString stringWithFormat:@"未找到匹配「%@」的技能", query];
+            return nil;
+        }
+        NSString *json = [skill toJSONString];
+        if (!json.length) {
+            if (outError) *outError = @"技能序列化失败";
+            return nil;
+        }
+        [UIPasteboard generalPasteboard].string = json;
+        return @{
+            @"ok": @YES,
+            @"name": skill.name ?: @"",
+            @"version": @(skill.version),
+            @"message": [NSString stringWithFormat:@"已将「%@」口令写入系统剪贴板", skill.name]
+        };
+    }
+
+    if (outError) *outError = [NSString stringWithFormat:@"未知本地技能工具：%@", name];
+    return nil;
 }
 
 - (NSArray *)toolSchemaFromLiveList:(NSArray *)tools {
-    // Guessing parameter names wastes steps (the model invented "bundleId"
-    // instead of "bundle_id"). Copy the real inputSchema straight from
-    // ios-mcp so the model always sees required fields and enums.
     NSMutableArray *out = [NSMutableArray array];
+    [out addObjectsFromArray:[self localSkillToolSchemas]];
+
     NSArray *allowed = IOSDebAllowedTools();
     for (NSDictionary *tool in tools) {
         if (![tool isKindOfClass:[NSDictionary class]]) continue;
         NSString *name = tool[@"name"];
         if (![name isKindOfClass:[NSString class]]) continue;
         if (![allowed containsObject:name]) continue;
+        if ([self isLocalSkillTool:name]) continue;
 
         NSDictionary *schema = tool[@"inputSchema"];
         if (![schema isKindOfClass:[NSDictionary class]]) {
@@ -474,6 +820,30 @@ static NSString *IOSDebHumanTool(NSString *name) {
     [self emit:IOSDebAgentEventStep step:step message:nil];
 
     NSDate *start = [NSDate date];
+    if ([self isLocalSkillTool:name]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (self->_cancelled) { [self finish:IOSDebAgentEndStopped message:@"已停止"]; return; }
+            NSString *localErr = nil;
+            NSDictionary *res = [self executeLocalSkillTool:name args:args error:&localErr];
+            step.duration = -[start timeIntervalSinceNow];
+            step.ok = (localErr == nil);
+            [self emit:IOSDebAgentEventStep step:step message:nil];
+
+            NSString *content = localErr
+                ? [NSString stringWithFormat:@"错误：%@", localErr]
+                : [[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:(res ?: @{}) options:0 error:nil]
+                                        encoding:NSUTF8StringEncoding];
+            [self appendToolResult:callID name:name content:(content ?: @"{}") ok:step.ok];
+            if (!step.ok) {
+                [self finish:IOSDebAgentEndFailed
+                     message:[NSString stringWithFormat:@"%@失败：%@", IOSDebHumanTool(name), localErr ?: @"未知"]];
+                return;
+            }
+            [self stepLoop];
+        });
+        return;
+    }
+
     [[IOSDebMCPClient shared] callTool:name arguments:args
                             completion:^(id result, NSString *error) {
         if (self->_cancelled) { [self finish:IOSDebAgentEndStopped message:@"已停止"]; return; }

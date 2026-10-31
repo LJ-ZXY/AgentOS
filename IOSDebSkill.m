@@ -244,6 +244,70 @@ static NSArray<NSString *> *IOSDebSkillStrings(id value) {
     return nil;
 }
 
+- (IOSDebSkill *)skillMatchingQuery:(NSString *)query {
+    if (![query isKindOfClass:[NSString class]]) return nil;
+    NSString *q = [query stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (q.length == 0) return nil;
+
+    // 1. Exact ID match
+    for (IOSDebSkill *s in _cache) {
+        if ([s.skillID isEqualToString:q]) return s;
+    }
+
+    // 2. Exact name match
+    for (IOSDebSkill *s in _cache) {
+        if (s.name.length && [s.name caseInsensitiveCompare:q] == NSOrderedSame) return s;
+    }
+
+    // Clean common filler words ("技能", "任务", "配方", quotes)
+    NSString *cleanQ = q;
+    for (NSString *noise in @[@"「", @"」", @"“", @"”", @"\"", @"'", @"技能", @"任务", @"配方"]) {
+        cleanQ = [cleanQ stringByReplacingOccurrencesOfString:noise withString:@""];
+    }
+    cleanQ = [cleanQ stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (cleanQ.length == 0) cleanQ = q;
+
+    // 3. Name substring match
+    for (IOSDebSkill *s in _cache) {
+        if (!s.name.length) continue;
+        if ([s.name localizedCaseInsensitiveContainsString:q] ||
+            [q localizedCaseInsensitiveContainsString:s.name] ||
+            [s.name localizedCaseInsensitiveContainsString:cleanQ] ||
+            [cleanQ localizedCaseInsensitiveContainsString:s.name]) {
+            return s;
+        }
+    }
+
+    // 4. AppName or summary substring match
+    for (IOSDebSkill *s in _cache) {
+        if ((s.appName.length && ([s.appName localizedCaseInsensitiveContainsString:cleanQ] ||
+                                  [cleanQ localizedCaseInsensitiveContainsString:s.appName])) ||
+            (s.summary.length && [s.summary localizedCaseInsensitiveContainsString:cleanQ])) {
+            return s;
+        }
+    }
+
+    // 5. Character overlap fallback (>= 2 shared non-space characters)
+    IOSDebSkill *bestSkill = nil;
+    NSInteger bestScore = 0;
+    for (IOSDebSkill *s in _cache) {
+        NSString *target = [NSString stringWithFormat:@"%@ %@", s.name ?: @"", s.appName ?: @""];
+        NSInteger score = 0;
+        for (NSUInteger i = 0; i < cleanQ.length; i++) {
+            NSString *ch = [cleanQ substringWithRange:NSMakeRange(i, 1)];
+            if ([ch stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]].length == 0) continue;
+            if ([target localizedCaseInsensitiveContainsString:ch]) {
+                score += 1;
+            }
+        }
+        if (score >= 2 && score > bestScore) {
+            bestScore = score;
+            bestSkill = s;
+        }
+    }
+    return bestSkill;
+}
+
 - (IOSDebSkill *)save:(IOSDebSkill *)skill {
     if (skill.skillID.length == 0) {
         skill.skillID = [[NSUUID UUID] UUIDString];

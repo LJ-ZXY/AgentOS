@@ -987,6 +987,10 @@ static NSString *const kPosYKey = @"ui.barY";
                                                                 inSection:0]
                               atScrollPosition:UITableViewScrollPositionBottom animated:YES];
             }
+            if (step.duration > 0 && step.ok &&
+                [@[@"update_skill", @"create_skill", @"delete_skill"] containsObject:step.toolName ?: @""]) {
+                [self reloadSkillChips];
+            }
         }
         [self updateTokenLabel];
         return;
@@ -996,8 +1000,8 @@ static NSString *const kPosYKey = @"ui.barY";
     if (_activeSkill) {
         [[IOSDebSkillStore shared] recordOutcome:_activeSkill success:ok];
         _activeSkill = nil;
-        [self reloadSkillChips];
     }
+    [self reloadSkillChips];
     [self setRunningUI:NO];
     [self setStatus:message ?: @"" color:(ok ? [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1]
                                             : [UIColor colorWithRed:0.898 green:0.329 blue:0.294 alpha:1])];

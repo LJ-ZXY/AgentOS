@@ -4,7 +4,7 @@ Depends: mobilesubstrate, preferenceloader
 Provides: com.witchan.ios-mcp
 Conflicts: com.witchan.ios-mcp
 Replaces: com.witchan.ios-mcp
-Version: 2.0.1
+Version: 2.1.0
 Architecture: iphoneos-arm
 Description: Autonomous AI Agent OS for iOS (All-in-One). Complete integrated on-device AI agent with embedded MCP server, PaddleOCR, and floating interaction panel.
 Maintainer: AgentOS Contributors

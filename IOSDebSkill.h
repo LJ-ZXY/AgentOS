@@ -46,6 +46,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (NSArray<IOSDebSkill *> *)allSkills;
 - (nullable IOSDebSkill *)skillWithID:(NSString *)skillID;
+- (nullable IOSDebSkill *)skillMatchingQuery:(NSString *)query;
 
 /// Writes the skill to disk and returns the stored copy (assigned an id and
 /// version if it did not have one).
