@@ -112,6 +112,12 @@ killall -9 SpringBoard
 
 ---
 
+## 🙏 Acknowledgments
+
+This project references and borrows from the open-source `ios-mcp` project for its underlying device control services.
+
+---
+
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
