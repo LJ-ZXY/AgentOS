@@ -126,7 +126,6 @@ static NSString *const kPosYKey = @"ui.barY";
     UIView *_divider;
     UIButton *_skillLibButton;
     UIButton *_recordButton;
-    UIButton *_importButton;
     UIView *_skillContainer;
     UITableView *_skillTable;
     UILabel *_skillEmptyLabel;
@@ -300,7 +299,7 @@ static NSString *const kPosYKey = @"ui.barY";
     CGFloat btnH = 32;
 
     _skillLibButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    _skillLibButton.frame = CGRectMake(12, chipY, 126, btnH);
+    _skillLibButton.frame = CGRectMake(14, chipY, 136, btnH);
     [_skillLibButton setTitle:@"⚡ 技能库" forState:UIControlStateNormal];
     _skillLibButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
     [_skillLibButton setTitleColor:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1] forState:UIControlStateNormal];
@@ -311,20 +310,8 @@ static NSString *const kPosYKey = @"ui.barY";
     [_skillLibButton addTarget:self action:@selector(openSkillLibrary) forControlEvents:UIControlEventTouchUpInside];
     [_panel addSubview:_skillLibButton];
 
-    _importButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    _importButton.frame = CGRectMake(12 + 126 + 8, chipY, 74, btnH);
-    [_importButton setTitle:@"+ 导入" forState:UIControlStateNormal];
-    _importButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-    [_importButton setTitleColor:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1] forState:UIControlStateNormal];
-    _importButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
-    _importButton.layer.cornerRadius = 16;
-    _importButton.layer.borderWidth = 1;
-    _importButton.layer.borderColor = [UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:0.35].CGColor;
-    [_importButton addTarget:self action:@selector(onImport) forControlEvents:UIControlEventTouchUpInside];
-    [_panel addSubview:_importButton];
-
     _recordButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    _recordButton.frame = CGRectMake(w - 24 - 86 - 12, chipY, 86, btnH);
+    _recordButton.frame = CGRectMake(w - 24 - 90 - 14, chipY, 90, btnH);
     [_recordButton setTitle:@"● 录制" forState:UIControlStateNormal];
     _recordButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
     [_recordButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
