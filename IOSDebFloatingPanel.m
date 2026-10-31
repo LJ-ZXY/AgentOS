@@ -143,6 +143,12 @@ static NSString *const kPosYKey = @"ui.barY";
     UIButton *_startRunButton;
     IOSDebSkill *_inspectingSkill;
     NSInteger _currentSelectedRounds;
+
+    // Skill Edit View
+    UIView *_skillEditContainer;
+    UITextField *_editNameField;
+    UITextView *_editLoopView;
+    UITextField *_editStopField;
     BOOL _recording;
     NSTimer *_barRevertTimer;
 
@@ -395,14 +401,22 @@ static NSString *const kPosYKey = @"ui.barY";
     [detailBackBtn addTarget:self action:@selector(closeSkillDetail) forControlEvents:UIControlEventTouchUpInside];
     [_skillDetailContainer addSubview:detailBackBtn];
 
-    _skillDetailTitle = [[UILabel alloc] initWithFrame:CGRectMake(80, 10, w - 24 - 150, 30)];
+    _skillDetailTitle = [[UILabel alloc] initWithFrame:CGRectMake(76, 10, w - 24 - 76 - 116, 30)];
     _skillDetailTitle.textAlignment = NSTextAlignmentCenter;
     _skillDetailTitle.font = [UIFont boldSystemFontOfSize:15];
     _skillDetailTitle.textColor = [UIColor whiteColor];
     [_skillDetailContainer addSubview:_skillDetailTitle];
 
+    UIButton *editSkillBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    editSkillBtn.frame = CGRectMake(w - 24 - 116, 10, 52, 30);
+    [editSkillBtn setTitle:@"✏️ 编辑" forState:UIControlStateNormal];
+    editSkillBtn.titleLabel.font = [UIFont systemFontOfSize:13];
+    [editSkillBtn setTitleColor:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1] forState:UIControlStateNormal];
+    [editSkillBtn addTarget:self action:@selector(onOpenSkillEdit) forControlEvents:UIControlEventTouchUpInside];
+    [_skillDetailContainer addSubview:editSkillBtn];
+
     UIButton *deleteSkillBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    deleteSkillBtn.frame = CGRectMake(w - 24 - 68, 10, 58, 30);
+    deleteSkillBtn.frame = CGRectMake(w - 24 - 58, 10, 50, 30);
     [deleteSkillBtn setTitle:@"删除" forState:UIControlStateNormal];
     deleteSkillBtn.titleLabel.font = [UIFont systemFontOfSize:13];
     [deleteSkillBtn setTitleColor:[UIColor colorWithRed:0.898 green:0.329 blue:0.294 alpha:1] forState:UIControlStateNormal];
@@ -505,6 +519,104 @@ static NSString *const kPosYKey = @"ui.barY";
     [_skillDetailContainer addSubview:exportBtn];
 
     [_panel addSubview:_skillDetailContainer];
+
+    // Skill Edit Container (covers _panel, hidden by default)
+    _skillEditContainer = [[UIView alloc] initWithFrame:_panel.bounds];
+    _skillEditContainer.backgroundColor = [self panelBackground];
+    _skillEditContainer.layer.cornerRadius = 20;
+    _skillEditContainer.layer.masksToBounds = YES;
+    _skillEditContainer.hidden = YES;
+
+    UIButton *cancelEditBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    cancelEditBtn.frame = CGRectMake(10, 10, 60, 30);
+    [cancelEditBtn setTitle:@"‹ 取消" forState:UIControlStateNormal];
+    cancelEditBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    [cancelEditBtn setTitleColor:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1] forState:UIControlStateNormal];
+    [cancelEditBtn addTarget:self action:@selector(onCancelSkillEdit) forControlEvents:UIControlEventTouchUpInside];
+    [_skillEditContainer addSubview:cancelEditBtn];
+
+    UILabel *editHeaderTitle = [[UILabel alloc] initWithFrame:CGRectMake(70, 10, w - 24 - 140, 30)];
+    editHeaderTitle.text = @"编辑技能配方";
+    editHeaderTitle.textAlignment = NSTextAlignmentCenter;
+    editHeaderTitle.font = [UIFont boldSystemFontOfSize:15];
+    editHeaderTitle.textColor = [UIColor whiteColor];
+    [_skillEditContainer addSubview:editHeaderTitle];
+
+    UIButton *saveEditBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    saveEditBtn.frame = CGRectMake(w - 24 - 64, 10, 54, 30);
+    [saveEditBtn setTitle:@"保存" forState:UIControlStateNormal];
+    saveEditBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    [saveEditBtn setTitleColor:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1] forState:UIControlStateNormal];
+    [saveEditBtn addTarget:self action:@selector(onSaveSkillEdit) forControlEvents:UIControlEventTouchUpInside];
+    [_skillEditContainer addSubview:saveEditBtn];
+
+    UIView *editDivider1 = [[UIView alloc] initWithFrame:CGRectMake(0, 44, w - 24, 1)];
+    editDivider1.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    [_skillEditContainer addSubview:editDivider1];
+
+    CGFloat contentW = w - 24 - 28;
+
+    UILabel *nameLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 50, contentW, 16)];
+    nameLabel.text = @"技能名称";
+    nameLabel.font = [UIFont boldSystemFontOfSize:11];
+    nameLabel.textColor = [UIColor colorWithWhite:1 alpha:0.5];
+    [_skillEditContainer addSubview:nameLabel];
+
+    _editNameField = [[UITextField alloc] initWithFrame:CGRectMake(14, 68, contentW, 30)];
+    _editNameField.font = [UIFont boldSystemFontOfSize:13];
+    _editNameField.textColor = [UIColor whiteColor];
+    _editNameField.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    _editNameField.layer.cornerRadius = 8;
+    _editNameField.layer.borderWidth = 0.5;
+    _editNameField.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.2].CGColor;
+    _editNameField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 8, 30)];
+    _editNameField.leftViewMode = UITextFieldViewModeAlways;
+    [_editNameField setKeyboardAppearance:UIKeyboardAppearanceDark];
+    [_skillEditContainer addSubview:_editNameField];
+
+    UILabel *loopLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 104, contentW, 16)];
+    loopLabel.text = @"循环核心步骤 (每行一步，描述具体可见文本)";
+    loopLabel.font = [UIFont boldSystemFontOfSize:11];
+    loopLabel.textColor = [UIColor colorWithWhite:1 alpha:0.5];
+    [_skillEditContainer addSubview:loopLabel];
+
+    _editLoopView = [[UITextView alloc] initWithFrame:CGRectMake(14, 122, contentW, 96)];
+    _editLoopView.font = [UIFont systemFontOfSize:12];
+    _editLoopView.textColor = [UIColor whiteColor];
+    _editLoopView.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    _editLoopView.layer.cornerRadius = 8;
+    _editLoopView.layer.borderWidth = 0.5;
+    _editLoopView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.2].CGColor;
+    _editLoopView.textContainerInset = UIEdgeInsetsMake(6, 6, 6, 6);
+    [_editLoopView setKeyboardAppearance:UIKeyboardAppearanceDark];
+    [_skillEditContainer addSubview:_editLoopView];
+
+    UILabel *stopLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 224, contentW, 16)];
+    stopLabel.text = @"停止条件 (什么时候算完成)";
+    stopLabel.font = [UIFont boldSystemFontOfSize:11];
+    stopLabel.textColor = [UIColor colorWithWhite:1 alpha:0.5];
+    [_skillEditContainer addSubview:stopLabel];
+
+    _editStopField = [[UITextField alloc] initWithFrame:CGRectMake(14, 242, contentW, 30)];
+    _editStopField.font = [UIFont systemFontOfSize:12];
+    _editStopField.textColor = [UIColor whiteColor];
+    _editStopField.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    _editStopField.layer.cornerRadius = 8;
+    _editStopField.layer.borderWidth = 0.5;
+    _editStopField.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.2].CGColor;
+    _editStopField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 8, 30)];
+    _editStopField.leftViewMode = UITextFieldViewModeAlways;
+    [_editStopField setKeyboardAppearance:UIKeyboardAppearanceDark];
+    [_skillEditContainer addSubview:_editStopField];
+
+    UILabel *tipLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 278, contentW, 36)];
+    tipLabel.text = @"💡 提示：步骤请使用具体动作词（如“点击”、“输入”），尽量指定手机上能看到的真实字眼。大模型天然支持语义泛化。";
+    tipLabel.font = [UIFont systemFontOfSize:10];
+    tipLabel.textColor = [UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:0.85];
+    tipLabel.numberOfLines = 2;
+    [_skillEditContainer addSubview:tipLabel];
+
+    [_panel addSubview:_skillEditContainer];
 
     [_panel addSubview:_skillContainer];
 
@@ -929,9 +1041,11 @@ static NSString *const kPosYKey = @"ui.barY";
     [UIView animateWithDuration:0.2 animations:^{
         self->_skillContainer.alpha = 0.0;
         self->_skillDetailContainer.alpha = 0.0;
+        self->_skillEditContainer.alpha = 0.0;
     } completion:^(__unused BOOL finished) {
         self->_skillContainer.hidden = YES;
         self->_skillDetailContainer.hidden = YES;
+        self->_skillEditContainer.hidden = YES;
         [self updateSkillLibButtonTitle];
     }];
 }
@@ -1057,6 +1171,103 @@ static NSString *const kPosYKey = @"ui.barY";
     [self closeSkillDetail];
     [self reloadSkillChips];
     [self setStatus:[NSString stringWithFormat:@"已删除「%@」", s.name] color:[UIColor orangeColor]];
+}
+
+- (void)onOpenSkillEdit {
+    if (!_inspectingSkill) return;
+    _editNameField.text = _inspectingSkill.name ?: @"";
+    _editLoopView.text = [_inspectingSkill.loopSteps componentsJoinedByString:@"\n"] ?: @"";
+    _editStopField.text = _inspectingSkill.stopCondition ?: @"";
+
+    [_panel bringSubviewToFront:_skillEditContainer];
+    _skillEditContainer.alpha = 0.0;
+    _skillEditContainer.hidden = NO;
+    [UIView animateWithDuration:0.25 animations:^{
+        self->_skillEditContainer.alpha = 1.0;
+    }];
+}
+
+- (void)onCancelSkillEdit {
+    [_editNameField resignFirstResponder];
+    [_editLoopView resignFirstResponder];
+    [_editStopField resignFirstResponder];
+    [_panel bringSubviewToFront:_skillDetailContainer];
+    [UIView animateWithDuration:0.2 animations:^{
+        self->_skillEditContainer.alpha = 0.0;
+    } completion:^(__unused BOOL finished) {
+        self->_skillEditContainer.hidden = YES;
+    }];
+}
+
+- (void)onSaveSkillEdit {
+    [_editNameField resignFirstResponder];
+    [_editLoopView resignFirstResponder];
+    [_editStopField resignFirstResponder];
+
+    NSString *name = [_editNameField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (name.length == 0) {
+        [self setStatus:@"技能名称不能为空" color:[UIColor orangeColor]];
+        return;
+    }
+
+    NSString *loopText = [_editLoopView.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (loopText.length == 0) {
+        [self setStatus:@"循环动作步骤不能为空" color:[UIColor orangeColor]];
+        return;
+    }
+
+    NSArray *rawLines = [loopText componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    NSMutableArray<NSString *> *cleanSteps = [NSMutableArray array];
+    for (NSString *line in rawLines) {
+        NSString *trimmed = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (trimmed.length == 0) continue;
+        // strip leading bullet / number prefixes if user entered them
+        if ([trimmed hasPrefix:@"·"] || [trimmed hasPrefix:@"-"] || [trimmed hasPrefix:@"*"]) {
+            trimmed = [[trimmed substringFromIndex:1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        }
+        [cleanSteps addObject:trimmed];
+    }
+
+    if (cleanSteps.count == 0) {
+        [self setStatus:@"请至少填写一个有效的循环动作步骤" color:[UIColor orangeColor]];
+        return;
+    }
+
+    NSString *stopText = [_editStopField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+    _inspectingSkill.name = name;
+    _inspectingSkill.loopSteps = cleanSteps;
+    _inspectingSkill.stopCondition = stopText;
+
+    [[IOSDebSkillStore shared] save:_inspectingSkill];
+    [self reloadSkillChips];
+
+    // Refresh detail inspector labels
+    _skillDetailTitle.text = _inspectingSkill.name;
+    NSInteger pct = (_inspectingSkill.runCount > 0) ? (NSInteger)llround(100.0 * _inspectingSkill.successCount / _inspectingSkill.runCount) : 0;
+    NSString *app = _inspectingSkill.appName.length ? _inspectingSkill.appName : (_inspectingSkill.appBundleID.length ? _inspectingSkill.appBundleID : @"通用应用");
+    _skillDetailAppLabel.text = [NSString stringWithFormat:@"目标：%@ · v%ld · 成功率 %ld%% (%ld次)",
+                                 app, (long)_inspectingSkill.version, (long)pct, (long)_inspectingSkill.runCount];
+    _skillDetailStepsLabel.text = [NSString stringWithFormat:@"步骤：进入 %lu 步 · 循环体 %lu 步/轮",
+                                   (unsigned long)_inspectingSkill.entrySteps.count,
+                                   (unsigned long)_inspectingSkill.loopSteps.count];
+    [self updateRoundsDisplay];
+
+    [_panel bringSubviewToFront:_skillDetailContainer];
+    [UIView animateWithDuration:0.2 animations:^{
+        self->_skillEditContainer.alpha = 0.0;
+    } completion:^(__unused BOOL finished) {
+        self->_skillEditContainer.hidden = YES;
+    }];
+
+    [self setStatus:[NSString stringWithFormat:@"已保存为 v%ld！建议先点击「单次测试 (1 轮)」验证", (long)_inspectingSkill.version]
+              color:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1]];
+
+    if (@available(iOS 10.0, *)) {
+        UINotificationFeedbackGenerator *gen = [[UINotificationFeedbackGenerator alloc] init];
+        [gen prepare];
+        [gen notificationOccurred:UINotificationFeedbackTypeSuccess];
+    }
 }
 
 - (void)onExportSkillDetail {

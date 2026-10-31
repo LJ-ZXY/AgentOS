@@ -82,14 +82,14 @@ chmod +x build_roothide.sh
 ./build_roothide.sh
 ```
 
-A `.deb` package (e.g. `com.witchan.ios-deb_2.0.0_iphoneos-arm64e.deb`) will be generated in `packages/`.
+A `.deb` package (e.g. `com.witchan.ios-deb_2.0.1_iphoneos-arm64e.deb`) will be generated in `packages/`.
 
 ### Deployment
 
 Install directly onto your device via `dpkg`:
 
 ```bash
-dpkg -i com.witchan.ios-deb_2.0.0_iphoneos-arm64e.deb
+dpkg -i com.witchan.ios-deb_2.0.1_iphoneos-arm64e.deb
 killall -9 SpringBoard
 ```
 

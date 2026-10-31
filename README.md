@@ -96,14 +96,14 @@ chmod +x build_roothide.sh
 ./build_roothide.sh
 ```
 
-构建成功后，将在 `packages/` 目录下生成类似 `com.witchan.ios-deb_2.0.0_iphoneos-arm64e.deb` 安装包。
+构建成功后，将在 `packages/` 目录下生成类似 `com.witchan.ios-deb_2.0.1_iphoneos-arm64e.deb` 安装包。
 
 ### 设备安装与部署
 
 可直接推送到越狱设备并通过 `dpkg` 安装：
 
 ```bash
-dpkg -i com.witchan.ios-deb_2.0.0_iphoneos-arm64e.deb
+dpkg -i com.witchan.ios-deb_2.0.1_iphoneos-arm64e.deb
 killall -9 SpringBoard
 ```
 
