@@ -114,12 +114,29 @@ static const NSInteger kMaxFrames = 120;
 
     NSMutableArray<NSString *> *texts = [NSMutableArray array];
     NSMutableArray<NSString *> *clickables = [NSMutableArray array];
+    NSMutableArray<NSDictionary *> *elemItems = [NSMutableArray array];
     for (NSDictionary *el in elements) {
         if (![el isKindOfClass:[NSDictionary class]]) continue;
         NSString *text = el[@"text"];
         if (![text isKindOfClass:[NSString class]] || text.length == 0) continue;
         [texts addObject:text];
-        if ([el[@"clickable"] boolValue]) [clickables addObject:text];
+        BOOL isClickable = [el[@"clickable"] boolValue];
+        if (isClickable) [clickables addObject:text];
+
+        NSDictionary *rect = [el[@"rect"] isKindOfClass:[NSDictionary class]] ? el[@"rect"] : nil;
+        NSInteger x = [rect[@"x"] integerValue];
+        NSInteger y = [rect[@"y"] integerValue];
+        NSInteger w = [rect[@"width"] integerValue];
+        NSInteger h = [rect[@"height"] integerValue];
+        [elemItems addObject:@{
+            @"text": text,
+            @"clickable": @(isClickable),
+            @"type": el[@"type"] ?: @"element",
+            @"x": @(x),
+            @"y": @(y),
+            @"w": @(w),
+            @"h": @(h)
+        }];
     }
     if (texts.count == 0) return nil;
 
@@ -128,6 +145,7 @@ static const NSInteger kMaxFrames = 120;
     frame.bundleID = front[@"bundleId"] ?: @"";
     frame.texts = texts;
     frame.clickableTexts = clickables;
+    frame.elements = elemItems;
     frame.timestamp = [[NSDate date] timeIntervalSince1970];
     return frame;
 }
@@ -170,17 +188,26 @@ static const NSInteger kMaxFrames = 120;
     for (IOSDebFrame *f in frames) {
         [out appendFormat:@"### 第 %ld 屏  应用：%@（%@）\n", (long)(f.index + 1),
                           f.appName, f.bundleID];
-        NSArray *texts = f.texts;
-        NSUInteger limit = MIN(texts.count, 40);
-        [out appendFormat:@"可见文本：%@\n",
-                          [[texts subarrayWithRange:NSMakeRange(0, limit)]
-                              componentsJoinedByString:@" | "]];
-        NSUInteger clickLimit = MIN(f.clickableTexts.count, 20);
-        if (clickLimit > 0) {
-            [out appendFormat:@"可点文本：%@\n",
-                              [[f.clickableTexts subarrayWithRange:NSMakeRange(0, clickLimit)]
-                                  componentsJoinedByString:@" | "]];
+        
+        NSMutableArray<NSString *> *telemetryLines = [NSMutableArray array];
+        NSUInteger limit = MIN(f.elements.count, (NSUInteger)35);
+        for (NSUInteger i = 0; i < limit; i++) {
+            NSDictionary *item = f.elements[i];
+            NSString *t = item[@"text"];
+            BOOL clickable = [item[@"clickable"] boolValue];
+            NSInteger x = [item[@"x"] integerValue];
+            NSInteger y = [item[@"y"] integerValue];
+            NSInteger w = [item[@"w"] integerValue];
+            NSInteger h = [item[@"h"] integerValue];
+            NSString *region = @"中部";
+            if (y < 220) region = @"顶部";
+            else if (y > 600) region = @"底部";
+            
+            [telemetryLines addObject:[NSString stringWithFormat:@"%@[%@,位置:%@,框:(%ld,%ld,%ld,%ld)]",
+                                      t, clickable ? @"可点" : @"静态", region, (long)x, (long)y, (long)w, (long)h]];
         }
+        [out appendFormat:@"空间布局与控件坐标：\n  %@\n",
+         [telemetryLines componentsJoinedByString:@"\n  "]];
     }
     return out;
 }
@@ -209,29 +236,33 @@ static const NSInteger kMaxFrames = 120;
     NSString *tips = hint.length ? hint : @"";
 
     NSString *prompt = [NSString stringWithFormat:
-        @"下面是一段真机操作录制。每一步是「屏幕发生了变化」，不是「手指点了哪里」，"
-        @"所以你要根据前后两屏的文本差异，反推用户做了什么操作。\n"
-        @"请把它归纳成一个可重复执行的技能，严格输出 JSON（不要 markdown 代码块，不要多余文字）。\n\n"
-        @"JSON 字段：\n"
+        @"下面是一段 iOS 真机操作录制。录制包含了每一屏所有控件的真实文本、可点击属性、屏幕区域（顶部/中部/底部）以及精确矩形坐标框 rect(x,y,w,h)。\n"
+        @"你的分析与归纳任务：\n"
+        @"1. 【借助坐标精准判定动作】：对比前后两屏的文本差异与控件坐标分布，精确推断用户手指点击了哪一个区域的哪个控件（例如：通过上一屏底部出现的按钮与下一屏内容刷新，锁定被点击的元素）。\n"
+        @"2. 【抽象为高泛化度规则】：在输出最终技能配方时，严禁死板硬编码绝对像素坐标！将坐标信息抽象升华为【定位规则】（如注明“点击位于屏幕底部的「下一题」按钮”、“点击位于中部选项列表中匹配含义的选项卡片”），确保跨设备不同分辨率皆可自适应。\n"
+        @"3. 【详尽的判定依据契约】：\n"
+        @"   - entrySteps：从桌面/入口进入任务起点的步骤，带上目标界面文本；\n"
+        @"   - startCondition：就位依据，说明通过看到什么特征界面（特定标题/按钮）确认可以开始循环；\n"
+        @"   - loopSteps：每轮循环核心操作。清晰交代观察依据（去哪看题目/输入内容）和点击规则；\n"
+        @"   - roundCheck：轮次判定标准，说明依据什么客观变化（如进度条数值从 N/30 变为 N+1/30，或页面文本被刷新）判定单轮完成；\n"
+        @"   - stopCondition：停止标准，说明看到什么条件代表全部任务已结束（如进度满额或结算弹窗出现）；\n"
+        @"   - exceptionRules：异常分支（广告/网络延迟弹窗等干扰项）处理策略。\n\n"
+        @"严格输出纯 JSON（不带 markdown 代码块，不带多余文字），字段规范：\n"
         @"{\n"
-        @"  \"name\": \"技能名，例如 单词闯关\",\n"
-        @"  \"summary\": \"一句话说明这个技能做什么\",\n"
-        @"  \"appName\": \"目标应用名称\",\n"
-        @"  \"appBundleID\": \"目标应用 bundle id，来自录制\",\n"
-        @"  \"entrySteps\": [\"从桌面开始到任务起点的步骤，每步一句话，必须带界面上真实出现的文本，例如：点击「单词闯关」\"],\n"
-        @"  \"startCondition\": \"如何确认已经就位可以开始循环\",\n"
-        @"  \"loopSteps\": [\"每一轮要做的动作，每步一句话\"],\n"
-        @"  \"roundCheck\": \"如何判断这一轮结束并进入下一轮\",\n"
-        @"  \"stopCondition\": \"什么时候应该停止\",\n"
-        @"  \"exceptionRules\": [\"录制中观察到的干扰项处理，例如每轮开头先关闭广告\"],\n"
-        @"  \"uncertainSteps\": [\"你无法从录制中确认的步骤，例如纯文字输入、开关切换\"]\n"
+        @"  \"name\": \"清晰规范的技能名称\",\n"
+        @"  \"summary\": \"一句话总结该技能全闭环目标\",\n"
+        @"  \"appName\": \"目标应用中文名\",\n"
+        @"  \"appBundleID\": \"目标应用 BundleID\",\n"
+        @"  \"entrySteps\": [\"进入步骤1\", \"进入步骤2\"],\n"
+        @"  \"startCondition\": \"就位判断标准\",\n"
+        @"  \"loopSteps\": [\"循环步骤1（含目标区域与选择依据）\", \"循环步骤2\"],\n"
+        @"  \"roundCheck\": \"单轮结束与下一轮触发依据\",\n"
+        @"  \"stopCondition\": \"全流程终止判定条件\",\n"
+        @"  \"exceptionRules\": [\"异常处理规则1\"],\n"
+        @"  \"uncertainSteps\": [\"无法100%%确定的步骤\"]\n"
         @"}\n\n"
-        @"规则：\n"
-        @"1. 所有步骤必须引用录制里真实出现过的界面文本，不要编造按钮名。\n"
-        @"2. 如果某一屏跳转看不出原因（前后文本差异过大），把它写进 uncertainSteps。\n"
-        @"3. 循环体只描述「每一轮都会重复」的动作，进入过程不算循环体。\n"
-        @"4. 用户补充说明：%@\n\n"
-        @"录制内容：\n%@",
+        @"用户补充说明：%@\n\n"
+        @"高保真录制时序与控件坐标数据：\n%@",
         tips, transcript];
 
     NSArray *messages = @[

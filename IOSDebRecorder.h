@@ -16,6 +16,7 @@ extern NSString *const IOSDebRecorderEventError;
 @property (nonatomic, copy) NSString *bundleID;
 @property (nonatomic, copy) NSArray<NSString *> *texts;
 @property (nonatomic, copy) NSArray<NSString *> *clickableTexts;
+@property (nonatomic, copy) NSArray<NSDictionary *> *elements; // Full telemetry: text, clickable, type, rect(x,y,w,h)
 @property (nonatomic, assign) NSTimeInterval timestamp;
 @end
 

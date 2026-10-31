@@ -30,6 +30,10 @@
   - **系统环境与感知控制（System OS Plane）**：支持直接读取设备全维状态（电量/存储/内存/系统版本/越狱环境）、读写剪贴板、调节屏幕亮度与媒体音量、管理应用生命周期与 URL 深链。
   - **屏幕感知与 UI 驱动（Perception & UI Plane）**：结合 iOS 无障碍树（AXTree）与端侧 PaddleOCR 实时语义定位操作界面。
   - **诊断与自愈分析（Diagnostics Plane）**：支持按需调取实时系统日志（Syslog）与崩溃堆栈（Crash Logs）进行故障诊断。
+- ⚡ **高保真空间感知录制与连贯执行流水线（High-Fidelity Telemetry & Action Chaining）**：
+  - **坐标与空间布局全维捕获**：录制时不再仅提取扁平文本，同步采集屏幕控件的几何轮廓 rect(x,y,w,h)、区域层级（顶部/中部/底部）与可点状态，大模型结合几何变化精准锁定操作动作，并在总结时抽象为高泛化度的语义规则，杜绝盲目推测。
+  - **连贯动作本地秒级流水线**：打破单轮单动作网络阻塞，支持多工具连续执行（Action Chaining），明确流程直接顺次推进，显著降低网络往返延迟。
+  - **结构化判定依据契约**：明确就位特征、循环观察依据、轮次递增指标与全流程终止条件，告别模棱两可的纯文本散文。
 - 🚀 **整装一体化架构（All-in-One Package）**：
   - **安装仅需一个包**：彻底告别双包分离时代！底层 MCP 控制服务、端侧 PaddleOCR 神经推理模型与 AgentOS 悬浮面板深度聚合于同一个 deb，用户只需一次安装即可获得完整闭环体验。
   - **设置入口全局统一**：系统「设置」中统一收拢至「AgentOS」唯一入口，底层服务（端口配置、服务启停、调试日志）无缝内嵌为二级子面板，彻底净化系统设置列表。
@@ -101,14 +105,14 @@ chmod +x build_roothide.sh
 ./build_roothide.sh
 ```
 
-构建成功后，将在 `packages/` 目录下生成类似 `com.witchan.ios-deb_2.1.0_iphoneos-arm64e.deb` 安装包。
+构建成功后，将在 `packages/` 目录下生成类似 `com.witchan.ios-deb_2.1.1_iphoneos-arm64e.deb` 安装包。
 
 ### 设备安装与部署
 
 可直接推送到越狱设备并通过 `dpkg` 安装：
 
 ```bash
-dpkg -i com.witchan.ios-deb_2.1.0_iphoneos-arm64e.deb
+dpkg -i com.witchan.ios-deb_2.1.1_iphoneos-arm64e.deb
 killall -9 SpringBoard
 ```
 

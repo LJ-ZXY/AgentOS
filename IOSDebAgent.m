@@ -266,7 +266,10 @@ static NSString *IOSDebHumanTool(NSString *name) {
         @"【平面四：诊断与自愈分析（Diagnostics Plane）】\n"
         @"- 工具：get_syslog / get_crash_logs / read_crash_log。排查闪退、异常或失败原因时按需调用。\n"
         @"\n"
-        @"【安全与边界】\n"
+        @"【极速连贯执行机制】\n"
+        @"- 对于预期明确的连贯动作（例如：选定题目的选项后需立即点击「下一题」，或连续输入多个表单项），你可以在单次模型响应中同时发起多个工具调用（Action Chaining），系统端会在本地极速连续执行，避免机械性停顿与多余的网络往返。\n"
+        @"- 在技能循环执行时，若已知下一步目标明确（如点击底部的「下一题」或点击特定按钮），直接调用 tap_element，无需每次机械性重复调用 describe_screen 扫描全屏，大幅提高执行速度。\n"
+        @"\n"@"【安全与边界】\n"
         @"- 本次任务最多 %ld 步。完成后停止调用工具并简短清晰地汇报结果。\n"
         @"- 若任务涉及付费、转账、发送外部消息，先向用户说明再执行。\n"
         @"%@",
@@ -754,25 +757,7 @@ static NSString *IOSDebHumanTool(NSString *name) {
         }
 
         [self->_messages addObject:json];
-
-        NSDictionary *call = toolCalls.firstObject;
-        NSDictionary *fn = call[@"function"];
-        NSString *name = fn[@"name"];
-        NSString *argsJSON = fn[@"arguments"] ?: @"{}";
-        NSString *callID = call[@"id"] ?: @"";
-
-        NSDictionary *args = [NSJSONSerialization JSONObjectWithData:
-            [argsJSON dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
-        if (![args isKindOfClass:[NSDictionary class]]) args = @{};
-
-        if (![IOSDebAllowedTools() containsObject:name ?: @""]) {
-            [self appendToolResult:callID name:name content:@"工具不允许使用" ok:NO];
-            [self finish:IOSDebAgentEndFailed
-                 message:[NSString stringWithFormat:@"模型请求了不被允许的工具：%@", name]];
-            return;
-        }
-
-        [self executeTool:name args:args callID:callID];
+        [self executeToolCalls:toolCalls atIndex:0];
     }];
 }
 
@@ -786,12 +771,46 @@ static NSString *IOSDebHumanTool(NSString *name) {
     }];
 }
 
-- (void)executeTool:(NSString *)name args:(NSDictionary *)args callID:(NSString *)callID {
-    [self executeTool:name args:args callID:callID attempt:1];
+- (void)executeToolCalls:(NSArray *)toolCalls atIndex:(NSUInteger)idx {
+    if (_cancelled) { [self finish:IOSDebAgentEndStopped message:@"已停止"]; return; }
+    if (idx >= toolCalls.count) {
+        [self stepLoop];
+        return;
+    }
+
+    NSDictionary *call = toolCalls[idx];
+    NSDictionary *fn = call[@"function"];
+    NSString *name = fn[@"name"];
+    NSString *argsJSON = fn[@"arguments"] ?: @"{}";
+    NSString *callID = call[@"id"] ?: @"";
+
+    NSDictionary *args = [NSJSONSerialization JSONObjectWithData:
+        [argsJSON dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+    if (![args isKindOfClass:[NSDictionary class]]) args = @{};
+
+    if (![IOSDebAllowedTools() containsObject:name ?: @""]) {
+        [self appendToolResult:callID name:name content:@"工具不允许使用" ok:NO];
+        [self finish:IOSDebAgentEndFailed
+             message:[NSString stringWithFormat:@"模型请求了不被允许的工具：%@", name]];
+        return;
+    }
+
+    __weak typeof(self) weakSelf = self;
+    [self executeSingleTool:name args:args callID:callID attempt:1 completion:^{
+        [weakSelf executeToolCalls:toolCalls atIndex:idx + 1];
+    }];
 }
 
-- (void)executeTool:(NSString *)name args:(NSDictionary *)args
-             callID:(NSString *)callID attempt:(NSInteger)attempt {
+- (void)executeTool:(NSString *)name args:(NSDictionary *)args callID:(NSString *)callID {
+    __weak typeof(self) weakSelf = self;
+    [self executeSingleTool:name args:args callID:callID attempt:1 completion:^{
+        [weakSelf stepLoop];
+    }];
+}
+
+- (void)executeSingleTool:(NSString *)name args:(NSDictionary *)args
+                   callID:(NSString *)callID attempt:(NSInteger)attempt
+               completion:(void (^)(void))completion {
     if (attempt == 1) {
         if (name.length && [name isEqualToString:self->_lastActionName] && [args isEqualToDictionary:self->_lastActionArgs]) {
             self->_consecutiveSameActionCount++;
@@ -839,7 +858,7 @@ static NSString *IOSDebHumanTool(NSString *name) {
                      message:[NSString stringWithFormat:@"%@失败：%@", IOSDebHumanTool(name), localErr ?: @"未知"]];
                 return;
             }
-            [self stepLoop];
+            if (completion) completion();
         });
         return;
     }
@@ -890,7 +909,7 @@ static NSString *IOSDebHumanTool(NSString *name) {
                                              (int64_t)(0.8 * NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
                     if (!self->_running || self->_cancelled) return;
-                    [self executeTool:name args:args callID:callID attempt:attempt + 1];
+                    [self executeSingleTool:name args:args callID:callID attempt:attempt + 1 completion:completion];
                 });
                 return;
             }
@@ -898,7 +917,7 @@ static NSString *IOSDebHumanTool(NSString *name) {
                  message:[NSString stringWithFormat:@"%@失败：%@", IOSDebHumanTool(name), error ?: @"未知"]];
             return;
         }
-        [self stepLoop];
+        if (completion) completion();
     }];
 }
 
