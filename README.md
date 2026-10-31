@@ -2,7 +2,9 @@
 
 中文 | [English](README_EN.md)
 
-**AgentOS** 是一款运行在 iOS 越狱环境上的端侧多模态自主执行智能体（Autonomous Mobile Agent Tweak）。
+**AgentOS** 是一款运行在 iOS 越狱环境上的端侧多模态自主执行智能体系统（All-in-One 一体化插件）。
+
+它深度集成了底层设备控制服务（MCP Server）、端侧 PaddleOCR 神经模型推理引擎与交互式悬浮思考面板，彻底摆脱了传统自动化对电脑连接与物理像素坐标的依赖。
 
 它彻底摆脱了传统自动化工具对电脑连接（USB/WiFi ADB）与死板物理坐标（Pixel Coordinates）的依赖，通过全局悬浮窗交互，支持**「观察式无感录制 -> 大模型语义提炼 -> 结构化配方持久化 -> 运行时动态定位自主执行」**全闭环。
 
@@ -23,6 +25,9 @@
   - **完成态（Done）**：变更为翡翠绿背景并显示 `✓ 完成`，同时触发 iOS 系统成功触感震动（Taptic Feedback），3 秒后平滑复原。
   - **中断/异常态（Stopped / Error）**：变更为警示橙背景并显示 `! 停止` 或 `! 异常`，伴随警告震动反馈。
   - **执行自折叠**：点击技能运行后浮窗自动收拢，绝不遮挡下层应用操作视野。
+- 🚀 **整装一体化架构（All-in-One Package）**：
+  - **安装仅需一个包**：彻底告别双包分离时代！底层 MCP 控制服务、端侧 PaddleOCR 神经推理模型与 AgentOS 悬浮面板深度聚合于同一个 deb，用户只需一次安装即可获得完整闭环体验。
+  - **设置入口全局统一**：系统「设置」中统一收拢至「AgentOS」唯一入口，底层服务（端口配置、服务启停、调试日志）无缝内嵌为二级子面板，彻底净化系统设置列表。
 - ⚡ **抽屉式技能中心与自定义轮次（Custom Rounds & Safe Stepper）**：
   - 点击「⚡ 技能库」平滑唤出垂直全景抽屉，长技能名完整展示零截断。
   - **自定义轮次与快捷步进**：点击技能进入详情，支持直接输入自定义目标轮数（如 100 轮），并配有 `[-10]` / `[+10]` 快捷步进按钮。
@@ -91,14 +96,14 @@ chmod +x build_roothide.sh
 ./build_roothide.sh
 ```
 
-构建成功后，将在 `packages/` 目录下生成类似 `com.witchan.ios-deb_1.3.1_iphoneos-arm64e.deb` 安装包。
+构建成功后，将在 `packages/` 目录下生成类似 `com.witchan.ios-deb_2.0.0_iphoneos-arm64e.deb` 安装包。
 
 ### 设备安装与部署
 
 可直接推送到越狱设备并通过 `dpkg` 安装：
 
 ```bash
-dpkg -i com.witchan.ios-deb_1.3.1_iphoneos-arm64e.deb
+dpkg -i com.witchan.ios-deb_2.0.0_iphoneos-arm64e.deb
 killall -9 SpringBoard
 ```
 

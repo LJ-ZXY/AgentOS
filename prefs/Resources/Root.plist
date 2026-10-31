@@ -108,7 +108,7 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
-			<string>步数上限越大越可能连续误点。默认 100 步，复杂任务可保留；简单的单页操作建议 10-15 步。</string>
+			<string>仅对主输入框直接下达的即时探索指令生效。技能库任务已全面启用动态配额，系统会自动根据设定的轮次自适应分配充沛步数，不受此数值截断。</string>
 			<key>label</key>
 			<string>执行安全</string>
 		</dict>
@@ -124,7 +124,7 @@
 			<key>keyboardType</key>
 			<string>NumberPad</string>
 			<key>label</key>
-			<string>单次步数上限</string>
+			<string>即时指令步数上限</string>
 			<key>placeholder</key>
 			<string>100</string>
 		</dict>
@@ -200,6 +200,25 @@
 			<key>label</key>
 			<string>清空日志</string>
 		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
+			<string>底层设备控制驱动服务（MCP 回环通道）。包含服务启停、端口配置与排错日志。</string>
+			<key>label</key>
+			<string>核心引擎与驱动服务</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSLinkCell</string>
+			<key>detail</key>
+			<string>IOSMCPRootListController</string>
+			<key>isController</key>
+			<true/>
+			<key>label</key>
+			<string>底层控制服务设置 (Core Engine)</string>
+		</dict>
+
 		<dict>
 			<key>cell</key>
 			<string>PSGroupCell</string>

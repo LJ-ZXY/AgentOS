@@ -39,8 +39,11 @@ endif
 
 iosdebprefs_FILES = prefs/IOSDEBRootListController.m \
                     prefs/IOSDEBLocalization.m \
-                    prefs/IOSDEBQRCodeCell.m
-iosdebprefs_CFLAGS = -fobjc-arc
+                    prefs/IOSDEBQRCodeCell.m \
+                    prefs/IOSMCPRootListController.m \
+                    prefs/IOSMCPLocalization.m \
+                    MCPLogger.m
+iosdebprefs_CFLAGS = -fobjc-arc -Iprefs -I.
 iosdebprefs_FRAMEWORKS = UIKit CoreGraphics
 iosdebprefs_PRIVATE_FRAMEWORKS = Preferences
 iosdebprefs_LDFLAGS = -F$(THEOS)/sdks/iPhoneOS16.5.sdk/System/Library/PrivateFrameworks
@@ -51,8 +54,12 @@ include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS_MAKE_PATH)/bundle.mk
 
 after-stage::
+	@# Merge core_engine (ios-mcp server, tools, paddleocr models, appsync) into staging
+	$(ECHO_NOTHING)mkdir -p "$(THEOS_STAGING_DIR)"$(ECHO_END)
+	$(ECHO_NOTHING)cp -a core_engine/* "$(THEOS_STAGING_DIR)/"$(ECHO_END)
 	@# Remap substrate and re-sign so SpringBoard can load the dylib.
-	$(ECHO_NOTHING)find "$(THEOS_STAGING_DIR)" -name "*.dylib" -exec install_name_tool -change /Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate @loader_path/.jbroot/usr/lib/libsubstrate.dylib {} + 2>/dev/null || true$(ECHO_END)
+	$(ECHO_NOTHING)find "$(THEOS_STAGING_DIR)" -name "*.dylib" -exec install_name_tool -change /Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate @loader_path/.jbroot/usr/lib/libsubstrate.dylib {} \; 2>/dev/null || true$(ECHO_END)
+	$(ECHO_NOTHING)find "$(THEOS_STAGING_DIR)" -name "*.dylib" -exec ldid -S {} \; 2>/dev/null || true$(ECHO_END)
 	$(ECHO_NOTHING)find "$(THEOS_STAGING_DIR)" -name "*.dylib" -exec ldid -S {} + 2>/dev/null || true$(ECHO_END)
 	$(ECHO_NOTHING)find "$(THEOS_STAGING_DIR)" -type f -name "iosdebprefs" -exec ldid -S {} + 2>/dev/null || true$(ECHO_END)
 	$(ECHO_NOTHING)mkdir -p "$(THEOS_STAGING_DIR)/Library/PreferenceLoader/Preferences"$(ECHO_END)
