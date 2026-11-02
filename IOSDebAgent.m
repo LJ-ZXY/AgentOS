@@ -173,6 +173,8 @@ static NSString *IOSDebHumanTool(NSString *name) {
     NSInteger _stagnantScreenCount;
     NSMutableDictionary<NSString *, NSDictionary *> *_cachedElementCenters;
     BOOL _isSkillRun;
+    NSInteger _llmRetryCount;
+    NSInteger _targetRounds;
 }
 
 @synthesize customStepLimit = _customStepLimit;
@@ -588,10 +590,8 @@ static NSString *IOSDebHumanTool(NSString *name) {
 
     NSArray *allowed = IOSDebAllowedTools();
     NSArray *skillFastTools = @[
-        @"tap_element", @"tap_screen", @"double_tap", @"long_press",
-        @"swipe_screen", @"drag_and_drop", @"input_text", @"type_text",
-        @"press_key", @"press_home", @"wake_and_home", @"launch_app",
-        @"open_url", @"wait_for_element", @"describe_screen", @"ocr_screen"
+        @"tap_element", @"tap_screen", @"swipe_screen", @"input_text",
+        @"press_key", @"wait_for_element", @"launch_app"
     ];
 
     for (NSDictionary *tool in tools) {
@@ -676,8 +676,17 @@ static NSString *IOSDebHumanTool(NSString *name) {
     _lastActionArgs = nil;
     _stagnantScreenCount = 0;
     _lastScreenSig = nil;
+    _llmRetryCount = 0;
     _cachedElementCenters = [NSMutableDictionary dictionary];
-    _isSkillRun = [instruction hasPrefix:@"正在执行已保存的技能"];
+    _isSkillRun = [instruction containsString:@"已保存的技能"];
+    _targetRounds = 0;
+    if (_isSkillRun) {
+        NSRange r = [instruction rangeOfString:@"本次目标轮数："];
+        if (r.location != NSNotFound) {
+            NSString *sub = [instruction substringFromIndex:r.location + r.length];
+            _targetRounds = [sub integerValue];
+        }
+    }
 
     [[IOSDebMCPClient shared] setEndpoint:store.endpoint];
 
@@ -780,7 +789,21 @@ static NSString *IOSDebHumanTool(NSString *name) {
                                             tools:_toolSchema
                                        completion:^(NSDictionary *json, NSString *text, NSString *error) {
         if (self->_cancelled) { [self finish:IOSDebAgentEndStopped message:@"已停止"]; return; }
-        if (error) { [self finish:IOSDebAgentEndFailed message:error]; return; }
+        if (error) {
+            if (self->_isSkillRun && self->_llmRetryCount < 3) {
+                self->_llmRetryCount++;
+                IOSDebLog(@"[agent] LLM transient error (%@), auto-retrying %ld/3...", error, (long)self->_llmRetryCount);
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    if (self->_running && !self->_cancelled) {
+                        [self stepLoop];
+                    }
+                });
+                return;
+            }
+            [self finish:IOSDebAgentEndFailed message:error];
+            return;
+        }
+        self->_llmRetryCount = 0;
 
         if (json[@"usage"]) {
             self->_tokenUsage += [json[@"usage"][@"total_tokens"] integerValue];
@@ -788,6 +811,22 @@ static NSString *IOSDebHumanTool(NSString *name) {
 
         NSArray *toolCalls = json[@"tool_calls"];
         if (![toolCalls isKindOfClass:[NSArray class]] || toolCalls.count == 0) {
+            NSInteger estDone = self->_currentStep / 2;
+            if (self->_isSkillRun && self->_targetRounds > 0 && estDone < self->_targetRounds && self->_currentStep < effectiveLimit) {
+                IOSDebLog(@"[agent] Model attempted early exit at %ld/%ld rounds, nudging to continue...",
+                          (long)estDone, (long)self->_targetRounds);
+                [self->_messages addObject:@{
+                    @"role": @"assistant",
+                    @"content": text.length ? text : @"继续作答"
+                }];
+                [self->_messages addObject:@{
+                    @"role": @"user",
+                    @"content": [NSString stringWithFormat:@"当前仅完成约 %ld 轮，未达到预定目标 %ld 轮，请继续查看当前屏幕选项并输出点击工具！",
+                                 (long)estDone, (long)self->_targetRounds]
+                }];
+                [self stepLoop];
+                return;
+            }
             NSString *finalText = text.length ? text : @"已完成";
             [self finish:IOSDebAgentEndCompleted message:finalText];
             return;
@@ -813,22 +852,41 @@ static NSString *IOSDebHumanTool(NSString *name) {
                  content:(NSString *)content ok:(BOOL)ok {
     NSString *marker = @"[动作执行后自动刷新屏幕";
     if ([content containsString:marker]) {
-        // Sliding window: strip stale screen snapshots from older tool results
-        // (keep only the immediately preceding snapshot) so 30+ round runs stay <5KB.
-        NSUInteger keptSnapshots = 0;
-        for (NSInteger i = (NSInteger)_messages.count - 1; i >= 0; i--) {
-            NSDictionary *m = _messages[(NSUInteger)i];
-            if ([m[@"role"] isEqualToString:@"tool"]) {
-                NSString *c = m[@"content"];
-                if ([c isKindOfClass:[NSString class]] && [c containsString:marker]) {
-                    keptSnapshots += 1;
-                    if (keptSnapshots >= 1) {
-                        NSRange r = [c rangeOfString:marker];
-                        if (r.location != NSNotFound) {
-                            NSMutableDictionary *mc = [m mutableCopy];
-                            mc[@"content"] = [[c substringToIndex:r.location]
-                                stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-                            _messages[(NSUInteger)i] = mc;
+        if (_isSkillRun && _messages.count > 3) {
+            // Ultra-compact rolling window for skills: keep system prompt, initial user prompt,
+            // and the latest assistant tool call. Input tokens stay <250 throughout 50+ rounds!
+            NSDictionary *lastAssistant = nil;
+            for (NSInteger i = (NSInteger)_messages.count - 1; i >= 0; i--) {
+                if ([_messages[(NSUInteger)i][@"role"] isEqualToString:@"assistant"]) {
+                    lastAssistant = _messages[(NSUInteger)i];
+                    break;
+                }
+            }
+            if (lastAssistant) {
+                NSDictionary *sysMsg = _messages[0];
+                NSDictionary *userMsg = _messages.count > 1 ? _messages[1] : nil;
+                NSMutableArray *compact = [NSMutableArray arrayWithObject:sysMsg];
+                if (userMsg) [compact addObject:userMsg];
+                [compact addObject:lastAssistant];
+                _messages = compact;
+            }
+        } else {
+            // Sliding window: strip stale screen snapshots from older tool results
+            NSUInteger keptSnapshots = 0;
+            for (NSInteger i = (NSInteger)_messages.count - 1; i >= 0; i--) {
+                NSDictionary *m = _messages[(NSUInteger)i];
+                if ([m[@"role"] isEqualToString:@"tool"]) {
+                    NSString *c = m[@"content"];
+                    if ([c isKindOfClass:[NSString class]] && [c containsString:marker]) {
+                        keptSnapshots += 1;
+                        if (keptSnapshots >= 1) {
+                            NSRange r = [c rangeOfString:marker];
+                            if (r.location != NSNotFound) {
+                                NSMutableDictionary *mc = [m mutableCopy];
+                                mc[@"content"] = [[c substringToIndex:r.location]
+                                    stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                                _messages[(NSUInteger)i] = mc;
+                            }
                         }
                     }
                 }
@@ -1083,11 +1141,11 @@ static NSString *IOSDebHumanTool(NSString *name) {
             return;
         }
 
-        // Auto-Observe after the last UI action in a batch: wait 0.25s for UI
-        // transition, capture compact screen + @(x,y) centers, and attach to
-        // the tool result so the LLM never needs a separate describe_screen turn!
+        // Auto-Observe after the last UI action in a batch: wait 0.08s for UI
+        // transition in skill mode (0.20s in normal mode), capture compact screen + @(x,y) centers!
         if (isLastInBatch && [self isUIActionTool:name]) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+            NSTimeInterval settleTime = self->_isSkillRun ? 0.08 : 0.20;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(settleTime * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
                 if (!self->_running || self->_cancelled) return;
                 [[IOSDebMCPClient shared] callTool:@"describe_screen"
@@ -1114,8 +1172,12 @@ static NSString *IOSDebHumanTool(NSString *name) {
                             }
                         }
                         if (compact.length > 0) {
-                            combined = [NSString stringWithFormat:@"%@\n\n[动作执行后自动刷新屏幕（含各元素中心坐标 @(x,y)，请直接决策下一步动作，无需调用 describe_screen）]\n%@",
-                                        trimmed, compact];
+                            NSInteger estDone = (self->_currentStep + 1) / 2;
+                            NSString *progressTag = (self->_targetRounds > 0)
+                                ? [NSString stringWithFormat:@"已完成约 %ld/%ld 轮", (long)estDone, (long)self->_targetRounds]
+                                : [NSString stringWithFormat:@"已执行 %ld 步", (long)self->_currentStep];
+                            combined = [NSString stringWithFormat:@"%@\n\n[动作执行后自动刷新屏幕 · %@（含各元素中心坐标 @(x,y)，请直接输出点击选项工具，无需调用 describe_screen）]\n%@",
+                                        trimmed, progressTag, compact];
                         }
                     }
                     [self appendToolResult:callID name:name content:combined ok:YES];
