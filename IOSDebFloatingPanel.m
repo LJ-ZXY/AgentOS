@@ -1004,7 +1004,7 @@ static NSString *const kPosYKey = @"ui.barY";
                               atScrollPosition:UITableViewScrollPositionBottom animated:YES];
             }
             if (_activeSkillTargetRounds > 0) {
-                NSInteger estDone = (step.index + 1) / 2;
+                NSInteger estDone = agent.completedRounds;
                 if (estDone > _activeSkillTargetRounds) estDone = _activeSkillTargetRounds;
                 _barLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightBold];
                 _barLabel.text = [NSString stringWithFormat:@"%ld/%ld", (long)estDone, (long)_activeSkillTargetRounds];

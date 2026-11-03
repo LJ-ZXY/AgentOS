@@ -181,7 +181,8 @@ static NSString *IOSDebHumanTool(NSString *name) {
     NSInteger _completedRounds;
     NSInteger _quizMissCount;
     BOOL _quizPageSeen;
-    NSString *_lastQuizSignature;
+    NSString *_lastQuizWord;
+    NSInteger _wrongAnswerHandlingCount;
 }
 
 @synthesize customStepLimit = _customStepLimit;
@@ -760,7 +761,8 @@ static NSString *IOSDebHumanTool(NSString *name) {
     _completedRounds = 0;
     _quizMissCount = 0;
     _quizPageSeen = NO;
-    _lastQuizSignature = nil;
+    _lastQuizWord = nil;
+    _wrongAnswerHandlingCount = 0;
     _lastElements = nil;
     [[IOSDebLexicon shared] preloadIfNeeded];
     _targetRounds = 0;
@@ -872,51 +874,30 @@ static NSString *IOSDebHumanTool(NSString *name) {
     // --- Fast-Bypass Check: Generalized Word Meaning Match ---
     if (_isSkillRun && _lastElements.count > 0) {
         if ([self isWrongAnswerScreenOnElements:_lastElements]) {
-            IOSDebLog(@"[agent] wrong answer explanation detected in stepLoop, swiping up to advance...");
-            _currentStep += 1;
-            IOSDebAgentStep *swipeStep = [[IOSDebAgentStep alloc] init];
-            swipeStep.index = _currentStep;
-            swipeStep.toolName = @"swipe_screen";
-            swipeStep.title = @"跳过解析";
-            swipeStep.detail = @"上滑进入下一题";
-            swipeStep.ok = YES;
-            swipeStep.duration = 0.3;
-            [self emit:IOSDebAgentEventStep step:swipeStep message:nil];
-
-            __weak typeof(self) weakSelf = self;
-            [[IOSDebMCPClient shared] callTool:@"swipe_screen"
-                                     arguments:@{@"fromX": @200, @"fromY": @700, @"toX": @200, @"toY": @350, @"duration": @300}
-                                    completion:^(id swRes, NSString *swErr) {
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    __strong typeof(weakSelf) self = weakSelf;
-                    if (!self || self->_cancelled || !self->_running) return;
-                    [[IOSDebMCPClient shared] callTool:@"describe_screen" arguments:@{} completion:^(id sRes, NSString *sErr) {
-                        __strong typeof(weakSelf) sSelf = weakSelf;
-                        if (!sSelf || sSelf->_cancelled || !sSelf->_running) return;
-                        NSDictionary *sDict = [sSelf dictionaryFromToolResult:sRes];
-                        if (sDict) [sSelf compactScreenFromResult:sDict];
-                        [sSelf stepLoop];
-                    }];
-                });
+            [self handleWrongAnswerScreenWithCompletion:^{
+                [self stepLoop];
             }];
             return;
         }
 
         IOSDebQuizFingerprint *fp = [[IOSDebLexicon shared] quizFingerprintOnElements:_lastElements];
-        if (fp) {
+        if (fp && fp.englishWord.length > 0) {
+            _wrongAnswerHandlingCount = 0;
             _quizPageSeen = YES;
-            if (_lastQuizSignature.length && ![fp.signature isEqualToString:_lastQuizSignature]) {
+            NSString *currentWord = fp.englishWord.lowercaseString;
+            if (_lastQuizWord.length > 0 && ![currentWord isEqualToString:_lastQuizWord]) {
                 _completedRounds += 1;
-                IOSDebLog(@"[agent] quiz round completed %ld/%ld", (long)_completedRounds, (long)_targetRounds);
+                IOSDebLog(@"[agent] 🎯 Question completed (%@ -> %@)! Total: %ld/%ld",
+                          _lastQuizWord, currentWord, (long)_completedRounds, (long)_targetRounds);
                 if (_targetRounds > 0 && _completedRounds >= _targetRounds) {
-                    _lastQuizSignature = [fp.signature copy];
+                    _lastQuizWord = [currentWord copy];
                     [self finish:IOSDebAgentEndCompleted
                          message:[NSString stringWithFormat:@"已完成目标 %ld 轮「英语单词选择练习」，练习顺利结束。",
                                   (long)_targetRounds]];
                     return;
                 }
             }
-            _lastQuizSignature = [fp.signature copy];
+            _lastQuizWord = [currentWord copy];
             if (_quizMissCount > 0) {
                 IOSDebLog(@"[agent] quiz recognisable again, clearing miss count (was %ld)", (long)_quizMissCount);
             }
@@ -1391,6 +1372,95 @@ static NSString *IOSDebHumanTool(NSString *name) {
     return NO;
 }
 
+- (BOOL)findNextButtonInElements:(NSArray<NSDictionary *> *)elements point:(CGPoint *)outPt {
+    if (![elements isKindOfClass:[NSArray class]]) return NO;
+    for (NSDictionary *el in elements) {
+        if (![el isKindOfClass:[NSDictionary class]]) continue;
+        NSString *t = el[@"text"];
+        if ([t isKindOfClass:[NSString class]] && [t containsString:@"下一题"]) {
+            NSDictionary *r = el[@"rect"];
+            if (r) {
+                if (outPt) {
+                    *outPt = CGPointMake([r[@"x"] doubleValue] + [r[@"width"] doubleValue] / 2.0,
+                                         [r[@"y"] doubleValue] + [r[@"height"] doubleValue] / 2.0);
+                }
+                return YES;
+            }
+        }
+    }
+    return NO;
+}
+
+- (void)handleWrongAnswerScreenWithCompletion:(void (^)(void))completion {
+    if (_cancelled || !_running) return;
+
+    _wrongAnswerHandlingCount += 1;
+    if (_wrongAnswerHandlingCount > 5) {
+        [self finish:IOSDebAgentEndFailed message:@"错题解析页面无法翻页，已停止"];
+        return;
+    }
+
+    CGPoint nextPt = CGPointZero;
+    if ([self findNextButtonInElements:_lastElements point:&nextPt]) {
+        IOSDebLog(@"[agent] wrong answer explanation detected, tapping 「下一题」 @(%.0f,%.0f)", nextPt.x, nextPt.y);
+        _currentStep += 1;
+        IOSDebAgentStep *step = [[IOSDebAgentStep alloc] init];
+        step.index = _currentStep;
+        step.toolName = @"tap_screen";
+        step.title = @"下一题";
+        step.detail = [NSString stringWithFormat:@"@(%.0f,%.0f) · 跳过解析", nextPt.x, nextPt.y];
+        step.ok = YES;
+        step.duration = 0.08;
+        [self emit:IOSDebAgentEventStep step:step message:nil];
+
+        __weak typeof(self) weakSelf = self;
+        [[IOSDebMCPClient shared] callTool:@"tap_screen"
+                                 arguments:@{@"x": @(nextPt.x), @"y": @(nextPt.y)}
+                                completion:^(id r, NSString *e) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) self = weakSelf;
+                if (!self || self->_cancelled || !self->_running) return;
+                [[IOSDebMCPClient shared] callTool:@"describe_screen" arguments:@{} completion:^(id sRes, NSString *sErr) {
+                    __strong typeof(weakSelf) sSelf = weakSelf;
+                    if (!sSelf || sSelf->_cancelled || !sSelf->_running) return;
+                    NSDictionary *sDict = [sSelf dictionaryFromToolResult:sRes];
+                    if (sDict) [sSelf compactScreenFromResult:sDict];
+                    if (completion) completion();
+                }];
+            });
+        }];
+        return;
+    }
+
+    IOSDebLog(@"[agent] wrong answer explanation detected, but 「下一题」 not on screen, swiping up to reveal (count=%ld)...", (long)_wrongAnswerHandlingCount);
+    _currentStep += 1;
+    IOSDebAgentStep *swipeStep = [[IOSDebAgentStep alloc] init];
+    swipeStep.index = _currentStep;
+    swipeStep.toolName = @"swipe_screen";
+    swipeStep.title = @"滚动找按钮";
+    swipeStep.detail = @"上滑露出下一题";
+    swipeStep.ok = YES;
+    swipeStep.duration = 0.3;
+    [self emit:IOSDebAgentEventStep step:swipeStep message:nil];
+
+    __weak typeof(self) weakSelf = self;
+    [[IOSDebMCPClient shared] callTool:@"swipe_screen"
+                             arguments:@{@"fromX": @200, @"fromY": @700, @"toX": @200, @"toY": @350, @"duration": @300}
+                            completion:^(id swRes, NSString *swErr) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) self = weakSelf;
+            if (!self || self->_cancelled || !self->_running) return;
+            [[IOSDebMCPClient shared] callTool:@"describe_screen" arguments:@{} completion:^(id sRes, NSString *sErr) {
+                __strong typeof(weakSelf) sSelf = weakSelf;
+                if (!sSelf || sSelf->_cancelled || !sSelf->_running) return;
+                NSDictionary *sDict = [sSelf dictionaryFromToolResult:sRes];
+                if (sDict) [sSelf compactScreenFromResult:sDict];
+                if (completion) completion();
+            }];
+        });
+    }];
+}
+
 - (void)executeFastBypassMatch:(IOSDebBypassMatch *)match {
     if (_cancelled || !_running) return;
 
@@ -1410,6 +1480,23 @@ static NSString *IOSDebHumanTool(NSString *name) {
     IOSDebLog(@"[agent] ⚡ Fast-Bypass [%ld/%ld]: %@ -> %@ @(%.0f,%.0f) (conf: %.2f)",
               (long)_bypassHitCount, (long)_targetRounds,
               match.englishWord, match.matchedOptionText, match.optionPoint.x, match.optionPoint.y, match.confidence);
+
+    if (_targetRounds > 0 && (_completedRounds + 1) >= _targetRounds) {
+        IOSDebLog(@"[agent] ⚡ Fast-Bypass: target rounds reached (%ld/%ld), finishing after tap",
+                  (long)(_completedRounds + 1), (long)_targetRounds);
+        __weak typeof(self) weakSelf = self;
+        [[IOSDebMCPClient shared] callTool:@"tap_screen"
+                                 arguments:@{@"x": @(match.optionPoint.x), @"y": @(match.optionPoint.y)}
+                                completion:^(id r, NSString *e) {
+            __strong typeof(weakSelf) self = weakSelf;
+            if (!self) return;
+            self->_completedRounds += 1;
+            [self finish:IOSDebAgentEndCompleted
+                 message:[NSString stringWithFormat:@"已完成目标 %ld 轮「英语单词选择练习」，练习顺利结束。",
+                          (long)self->_targetRounds]];
+        }];
+        return;
+    }
 
     __weak typeof(self) weakSelf = self;
     IOSDebQuizFingerprint *baseline = [[IOSDebLexicon shared] quizFingerprintOnElements:_lastElements];
@@ -1432,9 +1519,8 @@ static NSString *IOSDebHumanTool(NSString *name) {
     if (_cancelled || !_running) return;
 
     const NSInteger kMaxPolls = 4;
-    const NSTimeInterval kPollInterval = 0.3;
+    const NSTimeInterval kPollInterval = 0.25;
 
-    NSString *baselineSignature = baseline.signature;
     NSString *baselineWord = baseline.englishWord.length ? baseline.englishWord : match.englishWord.lowercaseString;
 
     __weak typeof(self) weakSelf = self;
@@ -1460,23 +1546,8 @@ static NSString *IOSDebHumanTool(NSString *name) {
         [self compactScreenFromResult:scrDict];
 
         if ([self isWrongAnswerScreenOnElements:self->_lastElements]) {
-            IOSDebLog(@"[agent] wrong answer explanation detected after tap, swiping up to advance...");
-            self->_currentStep += 1;
-            IOSDebAgentStep *swipeStep = [[IOSDebAgentStep alloc] init];
-            swipeStep.index = self->_currentStep;
-            swipeStep.toolName = @"swipe_screen";
-            swipeStep.title = @"跳过解析";
-            swipeStep.detail = @"上滑进入下一题";
-            swipeStep.ok = YES;
-            swipeStep.duration = 0.3;
-            [self emit:IOSDebAgentEventStep step:swipeStep message:nil];
-
-            [[IOSDebMCPClient shared] callTool:@"swipe_screen"
-                                     arguments:@{@"fromX": @200, @"fromY": @700, @"toX": @200, @"toY": @350, @"duration": @300}
-                                    completion:^(id swRes, NSString *swErr) {
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    [self awaitNewQuestionAfterMatch:match baseline:baseline attempt:0 didTapNext:YES];
-                });
+            [self handleWrongAnswerScreenWithCompletion:^{
+                [self stepLoop];
             }];
             return;
         }
@@ -1484,11 +1555,8 @@ static NSString *IOSDebHumanTool(NSString *name) {
         IOSDebQuizFingerprint *fp = [[IOSDebLexicon shared] quizFingerprintOnElements:self->_lastElements];
         BOOL advanced = NO;
         if (fp && fp.englishWord.length > 0) {
-            if (baselineSignature.length) {
-                advanced = ![fp.signature isEqualToString:baselineSignature];
-            } else {
-                // Without a full baseline, only a different word proves progress.
-                advanced = ![fp.englishWord isEqualToString:baselineWord];
+            if (![fp.englishWord.lowercaseString isEqualToString:baselineWord.lowercaseString]) {
+                advanced = YES;
             }
         }
 
