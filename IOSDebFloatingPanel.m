@@ -1062,6 +1062,7 @@ static NSString *const kPosYKey = @"ui.barY";
 #pragma mark - Skills
 
 - (void)openSkillLibrary {
+    [[IOSDebSkillStore shared] reload];
     [self reloadSkillChips];
     [_panel bringSubviewToFront:_skillContainer];
     _skillContainer.alpha = 0.0;

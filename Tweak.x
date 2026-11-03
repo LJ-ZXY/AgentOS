@@ -2,6 +2,7 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import "IOSDebFloatingPanel.h"
 #import "IOSDebAgent.h"
+#import "IOSDebSkill.h"
 #import "IOSDebMCPClient.h"
 #import "IOSDebStore.h"
 #import "IOSDebLog.h"
@@ -80,6 +81,7 @@ static void IOSDebControlCallback(CFNotificationCenterRef center, void *observer
         IOSDebLog(@"[control] hide requested");
     } else if ([n hasSuffix:@"/reload"]) {
         [[IOSDebStore shared] reload];
+        [[IOSDebSkillStore shared] reload];
         [[IOSDebMCPClient shared] setEndpoint:[IOSDebStore shared].endpoint];
         [[IOSDebMCPClient shared] invalidateSession];
         IOSDebLog(@"[control] configuration reloaded");

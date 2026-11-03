@@ -338,17 +338,25 @@ static NSArray<NSString *> *IOSDebSkillStrings(id value) {
 }
 
 - (IOSDebSkill *)save:(IOSDebSkill *)skill {
+    return [self save:skill bumpVersion:YES];
+}
+
+- (IOSDebSkill *)save:(IOSDebSkill *)skill bumpVersion:(BOOL)bumpVersion {
     if (skill.skillID.length == 0) {
         skill.skillID = [[NSUUID UUID] UUIDString];
     }
     if (skill.name.length == 0) skill.name = @"未命名技能";
     skill.updatedAt = [[NSDate date] timeIntervalSince1970];
 
-    // Overwriting an existing skill bumps its version so a bad re-record can
-    // be recognised from the number alone.
+    // Overwriting an existing skill bumps its version only when explicitly
+    // requested (e.g. recipe edited or re-recorded). Pure statistic updates do not bump version.
     IOSDebSkill *existing = [self skillWithID:skill.skillID];
     if (existing) {
-        skill.version = existing.version + 1;
+        if (bumpVersion) {
+            skill.version = existing.version + 1;
+        } else {
+            skill.version = existing.version;
+        }
         if (skill.runCount == 0) {
             skill.runCount = existing.runCount;
             skill.successCount = existing.successCount;
@@ -386,7 +394,7 @@ static NSArray<NSString *> *IOSDebSkillStrings(id value) {
     if (!skill) return;
     skill.runCount += 1;
     if (success) skill.successCount += 1;
-    [self save:skill];
+    [self save:skill bumpVersion:NO];
 }
 
 @end

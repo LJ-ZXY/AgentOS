@@ -51,10 +51,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// Writes the skill to disk and returns the stored copy (assigned an id and
 /// version if it did not have one).
 - (IOSDebSkill *)save:(IOSDebSkill *)skill;
+- (IOSDebSkill *)save:(IOSDebSkill *)skill bumpVersion:(BOOL)bumpVersion;
 - (void)removeSkill:(IOSDebSkill *)skill;
 - (void)recordOutcome:(IOSDebSkill *)skill success:(BOOL)success;
 
 - (NSString *)directoryPath;
+- (void)reload;
 
 @end
 
