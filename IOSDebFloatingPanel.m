@@ -156,6 +156,8 @@ static NSString *const kPosYKey = @"ui.barY";
     CGPoint _dragStart;
     CGPoint _barOrigin;
     BOOL _dragging;
+    NSDate *_taskStartTime;
+    NSInteger _activeSkillTargetRounds;
 }
 
 + (instancetype)shared {
@@ -826,6 +828,8 @@ static NSString *const kPosYKey = @"ui.barY";
     [_table reloadData];
     _input.text = @"";
     _counter.text = @"0 / 500";
+    _taskStartTime = [NSDate date];
+    _activeSkillTargetRounds = 0;
     [self setRunningUI:YES];
     [self setStatus:@"正在执行…" color:[UIColor colorWithRed:0.431 green:0.659 blue:1 alpha:1]];
 
@@ -852,6 +856,7 @@ static NSString *const kPosYKey = @"ui.barY";
     [_barLabel.layer removeAnimationForKey:@"breathing"];
     _barLabel.layer.opacity = 1.0;
 
+    _barLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
     _barLabel.text = @"AI";
     _barLabel.textColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1.0];
     _bar.backgroundColor = [self panelBackground];
@@ -864,7 +869,13 @@ static NSString *const kPosYKey = @"ui.barY";
         [_barRevertTimer invalidate];
         _barRevertTimer = nil;
     }
-    _barLabel.text = @"AI";
+    if (_activeSkillTargetRounds > 0) {
+        _barLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightBold];
+        _barLabel.text = [NSString stringWithFormat:@"0/%ld", (long)_activeSkillTargetRounds];
+    } else {
+        _barLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
+        _barLabel.text = @"AI";
+    }
     _barLabel.textColor = [UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1.0];
     _bar.backgroundColor = [self panelBackground];
     _bar.layer.borderColor = [UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:0.9].CGColor;
@@ -901,6 +912,7 @@ static NSString *const kPosYKey = @"ui.barY";
     [_barLabel.layer removeAnimationForKey:@"breathing"];
     _barLabel.layer.opacity = 1.0;
 
+    _barLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightBold];
     _barLabel.text = @"✓ 完成";
     _barLabel.textColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1.0];
     _bar.backgroundColor = [UIColor colorWithRed:0.04 green:0.18 blue:0.10 alpha:0.95];
@@ -991,6 +1003,12 @@ static NSString *const kPosYKey = @"ui.barY";
                                                                 inSection:0]
                               atScrollPosition:UITableViewScrollPositionBottom animated:YES];
             }
+            if (_activeSkillTargetRounds > 0) {
+                NSInteger estDone = (step.index + 1) / 2;
+                if (estDone > _activeSkillTargetRounds) estDone = _activeSkillTargetRounds;
+                _barLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightBold];
+                _barLabel.text = [NSString stringWithFormat:@"%ld/%ld", (long)estDone, (long)_activeSkillTargetRounds];
+            }
             if (step.duration > 0 && step.ok &&
                 [@[@"update_skill", @"create_skill", @"delete_skill"] containsObject:step.toolName ?: @""]) {
                 [self reloadSkillChips];
@@ -1001,14 +1019,28 @@ static NSString *const kPosYKey = @"ui.barY";
     }
 
     BOOL ok = [event isEqualToString:IOSDebAgentEventDone];
+    NSInteger completedRounds = _activeSkillTargetRounds;
+    NSTimeInterval elapsed = _taskStartTime ? -[_taskStartTime timeIntervalSinceNow] : 0;
+
     if (_activeSkill) {
         [[IOSDebSkillStore shared] recordOutcome:_activeSkill success:ok];
         _activeSkill = nil;
     }
+    _activeSkillTargetRounds = 0;
+    _taskStartTime = nil;
+
     [self reloadSkillChips];
     [self setRunningUI:NO];
-    [self setStatus:message ?: @"" color:(ok ? [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1]
-                                            : [UIColor colorWithRed:0.898 green:0.329 blue:0.294 alpha:1])];
+
+    NSString *finalStatus = message ?: @"";
+    if (ok && completedRounds > 0 && elapsed > 0) {
+        double avg = elapsed / (double)completedRounds;
+        finalStatus = [NSString stringWithFormat:@"已完成 %ld 轮 · 耗时 %.1fs · 均速 %.2fs/轮",
+                       (long)completedRounds, elapsed, avg];
+    }
+
+    [self setStatus:finalStatus color:(ok ? [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1]
+                                          : [UIColor colorWithRed:0.898 green:0.329 blue:0.294 alpha:1])];
     [self updateTokenLabel];
 
     if (ok) {
@@ -1162,10 +1194,28 @@ static NSString *const kPosYKey = @"ui.barY";
     [_roundsField resignFirstResponder];
     if (!_inspectingSkill) return;
     IOSDebSkill *s = _inspectingSkill;
-    [[IOSDebSkillStore shared] removeSkill:s];
-    [self closeSkillDetail];
-    [self reloadSkillChips];
-    [self setStatus:[NSString stringWithFormat:@"已删除「%@」", s.name] color:[UIColor orangeColor]];
+
+    UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:@"确认删除技能"
+                                            message:[NSString stringWithFormat:@"确定要删除技能「%@」吗？\n删除后无法恢复（建议先导出备份）。", s.name]
+                                     preferredStyle:UIAlertControllerStyleAlert];
+
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"删除"
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(__unused UIAlertAction *action) {
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) return;
+        [[IOSDebSkillStore shared] removeSkill:s];
+        [self closeSkillDetail];
+        [self reloadSkillChips];
+        [self setStatus:[NSString stringWithFormat:@"已删除「%@」", s.name] color:[UIColor orangeColor]];
+        [self showSimpleAlert:@"已删除" message:[NSString stringWithFormat:@"技能「%@」已成功移除。", s.name]];
+    }]];
+
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+
+    [[self topViewController] presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)onOpenSkillEdit {
@@ -1302,6 +1352,8 @@ static NSString *const kPosYKey = @"ui.barY";
     if (dynamicBudget < 30) dynamicBudget = 30;
 
     _activeSkill = skill;
+    _taskStartTime = [NSDate date];
+    _activeSkillTargetRounds = rounds;
     [_steps removeAllObjects];
     [_table reloadData];
     [self setRunningUI:YES];
