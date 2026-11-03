@@ -24,6 +24,7 @@ ios-deb_FILES = Tweak.x \
                 IOSDebAgent.m \
                 IOSDebSkill.m \
                 IOSDebRecorder.m \
+                IOSDebLexicon.m \
                 IOSDebFloatingPanel.m
 
 ios-deb_CFLAGS = -fobjc-arc -Wno-unused-function -Wno-deprecated-declarations

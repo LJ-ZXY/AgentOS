@@ -30,6 +30,10 @@
   - **系统环境与感知控制（System OS Plane）**：支持直接读取设备全维状态（电量/存储/内存/系统版本/越狱环境）、读写剪贴板、调节屏幕亮度与媒体音量、管理应用生命周期与 URL 深链。
   - **屏幕感知与 UI 驱动（Perception & UI Plane）**：结合 iOS 无障碍树（AXTree）与端侧 PaddleOCR 实时语义定位操作界面。
   - **诊断与自愈分析（Diagnostics Plane）**：支持按需调取实时系统日志（Syslog）与崩溃堆栈（Crash Logs）进行故障诊断。
+- 📖 **端侧离线双语词义秒级直切与空间翻译底座（Local Lexicon & Spatial Translation Base）**：
+  - **离线词库与形态学还原**：内置 17,795 核心词条与 23,791 条词形还原（Lemmas）规则库，在 iPhone 端侧以  完成变形词还原与释义召回。
+  - **通用词义极速直切**：在屏幕出现英文单词与中文选项场景下，端侧直接结合空间几何与词义交集打分秒切，单轮耗时压缩至 ，0 网络请求、0 Token 消耗，低置信度无感回退云端大模型。
+  - **空间翻译切片底座**：统一抽象带物理坐标的  翻译单元，内置  与  端侧工具，为全屏实时翻译图层奠定基础设施。
 - ⚡ **高保真空间感知录制与连贯执行流水线（High-Fidelity Telemetry & Action Chaining）**：
   - **坐标与空间布局全维捕获**：录制时不再仅提取扁平文本，同步采集屏幕控件的几何轮廓 rect(x,y,w,h)、区域层级（顶部/中部/底部）与可点状态，大模型结合几何变化精准锁定操作动作，并在总结时抽象为高泛化度的语义规则，杜绝盲目推测。
   - **连贯动作本地秒级流水线**：打破单轮单动作网络阻塞，支持多工具连续执行（Action Chaining），明确流程直接顺次推进，显著降低网络往返延迟。
@@ -105,14 +109,14 @@ chmod +x build_roothide.sh
 ./build_roothide.sh
 ```
 
-构建成功后，将在 `packages/` 目录下生成类似 `com.witchan.ios-deb_2.1.1_iphoneos-arm64e.deb` 安装包。
+构建成功后，将在 `packages/` 目录下生成类似 `com.witchan.ios-deb_2.1.3_iphoneos-arm64e.deb` 安装包。
 
 ### 设备安装与部署
 
 可直接推送到越狱设备并通过 `dpkg` 安装：
 
 ```bash
-dpkg -i com.witchan.ios-deb_2.1.1_iphoneos-arm64e.deb
+dpkg -i com.witchan.ios-deb_2.1.3_iphoneos-arm64e.deb
 killall -9 SpringBoard
 ```
 

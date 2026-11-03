@@ -5,6 +5,7 @@
 #import "IOSDebSkill.h"
 #import "IOSDebStore.h"
 #import "IOSDebLog.h"
+#import "IOSDebLexicon.h"
 
 NSString *const IOSDebAgentEventStep = @"step";
 NSString *const IOSDebAgentEventDone = @"done";
@@ -175,9 +176,17 @@ static NSString *IOSDebHumanTool(NSString *name) {
     BOOL _isSkillRun;
     NSInteger _llmRetryCount;
     NSInteger _targetRounds;
+    NSInteger _bypassHitCount;
+    NSArray<NSDictionary *> *_lastElements;
+    NSInteger _completedRounds;
+    NSInteger _quizMissCount;
+    BOOL _quizPageSeen;
+    NSString *_lastQuizSignature;
 }
 
 @synthesize customStepLimit = _customStepLimit;
+@synthesize bypassHitCount = _bypassHitCount;
+@synthesize completedRounds = _completedRounds;
 
 + (instancetype)shared {
     static IOSDebAgent *a;
@@ -282,6 +291,34 @@ static NSString *IOSDebHumanTool(NSString *name) {
 
 - (NSArray<NSDictionary *> *)localSkillToolSchemas {
     return @[
+        @{
+            @"type": @"function",
+            @"function": @{
+                @"name": @"lookup_word",
+                @"description": @"查询指定英文单词或短语在本地离线词典中的中文释义与词根，耗时 < 0.1ms，无需联网。",
+                @"parameters": @{
+                    @"type": @"object",
+                    @"properties": @{
+                        @"word": @{
+                            @"type": @"string",
+                            @"description": @"需要查询的英文单词或短语"
+                        }
+                    },
+                    @"required": @[@"word"]
+                }
+            }
+        },
+        @{
+            @"type": @"function",
+            @"function": @{
+                @"name": @"translate_screen_text",
+                @"description": @"使用本地空间翻译引擎快速分析当前屏幕上的所有英文元素，返回其物理坐标与紧凑中文释义列表（全屏翻译底座接口）。",
+                @"parameters": @{
+                    @"type": @"object",
+                    @"properties": @{}
+                }
+            }
+        },
         @{
             @"type": @"function",
             @"function": @{
@@ -432,7 +469,9 @@ static NSString *IOSDebHumanTool(NSString *name) {
         @"update_skill",
         @"create_skill",
         @"delete_skill",
-        @"export_skill_to_clipboard"
+        @"export_skill_to_clipboard",
+        @"lookup_word",
+        @"translate_screen_text"
     ] containsObject:name];
 }
 
@@ -578,6 +617,44 @@ static NSString *IOSDebHumanTool(NSString *name) {
         };
     }
 
+    if ([name isEqualToString:@"lookup_word"]) {
+        NSString *w = [args[@"word"] isKindOfClass:[NSString class]] ? args[@"word"] : @"";
+        if (!w.length) {
+            if (outError) *outError = @"查词必须提供 word 参数";
+            return nil;
+        }
+        IOSDebLexicon *lex = [IOSDebLexicon shared];
+        NSString *lemma = [lex lemmatizeWord:w];
+        NSArray *meanings = [lex lookupMeaningsForWord:w];
+        return @{
+            @"ok": @YES,
+            @"word": w,
+            @"lemma": lemma ?: w,
+            @"found": @(meanings.count > 0),
+            @"meanings": meanings ?: @[],
+            @"translation": [lex lookupMeaningsForWord:w].firstObject ?: @""
+        };
+    }
+
+    if ([name isEqualToString:@"translate_screen_text"]) {
+        NSArray *spans = [[IOSDebLexicon shared] annotateScreenElements:self->_lastElements ?: @[]];
+        NSMutableArray *res = [NSMutableArray array];
+        for (IOSDebTranslatedSpan *s in spans) {
+            [res addObject:@{
+                @"text": s.sourceText ?: @"",
+                @"lemma": s.lemma ?: @"",
+                @"trans": s.compactTranslation ?: @"",
+                @"rect": @{@"x": @(s.rect.origin.x), @"y": @(s.rect.origin.y), @"w": @(s.rect.size.width), @"h": @(s.rect.size.height)},
+                @"clickable": @(s.clickable)
+            }];
+        }
+        return @{
+            @"ok": @YES,
+            @"total_translated": @(res.count),
+            @"spans": res
+        };
+    }
+
     if (outError) *outError = [NSString stringWithFormat:@"未知本地技能工具：%@", name];
     return nil;
 }
@@ -679,6 +756,13 @@ static NSString *IOSDebHumanTool(NSString *name) {
     _llmRetryCount = 0;
     _cachedElementCenters = [NSMutableDictionary dictionary];
     _isSkillRun = [instruction containsString:@"已保存的技能"];
+    _bypassHitCount = 0;
+    _completedRounds = 0;
+    _quizMissCount = 0;
+    _quizPageSeen = NO;
+    _lastQuizSignature = nil;
+    _lastElements = nil;
+    [[IOSDebLexicon shared] preloadIfNeeded];
     _targetRounds = 0;
     if (_isSkillRun) {
         NSRange r = [instruction rangeOfString:@"本次目标轮数："];
@@ -785,6 +869,42 @@ static NSString *IOSDebHumanTool(NSString *name) {
         return;
     }
 
+    // --- Fast-Bypass Check: Generalized Word Meaning Match ---
+    if (_isSkillRun && _lastElements.count > 0) {
+        IOSDebQuizFingerprint *fp = [[IOSDebLexicon shared] quizFingerprintOnElements:_lastElements];
+        if (fp) {
+            _quizPageSeen = YES;
+            if (_lastQuizSignature.length && ![fp.signature isEqualToString:_lastQuizSignature]) {
+                _completedRounds += 1;
+                IOSDebLog(@"[agent] quiz round completed %ld/%ld", (long)_completedRounds, (long)_targetRounds);
+                if (_targetRounds > 0 && _completedRounds >= _targetRounds) {
+                    _lastQuizSignature = [fp.signature copy];
+                    [self finish:IOSDebAgentEndCompleted
+                         message:[NSString stringWithFormat:@"已完成目标 %ld 轮「英语单词选择练习」，练习顺利结束。",
+                                  (long)_targetRounds]];
+                    return;
+                }
+            }
+            _lastQuizSignature = [fp.signature copy];
+            if (_quizMissCount > 0) {
+                IOSDebLog(@"[agent] quiz recognisable again, clearing miss count (was %ld)", (long)_quizMissCount);
+            }
+            _quizMissCount = 0;
+        } else if (_quizPageSeen) {
+            _quizMissCount += 1;
+            if (_quizMissCount >= 3) {
+                [self finish:IOSDebAgentEndFailed message:@"连续 3 次未识别到答题页面，已停止"];
+                return;
+            }
+        }
+
+        IOSDebBypassMatch *match = [[IOSDebLexicon shared] evaluateWordMeaningMatchOnElements:_lastElements];
+        if (match && match.confidence >= 0.75) {
+            [self executeFastBypassMatch:match];
+            return;
+        }
+    }
+
     [[IOSDebLLMClient shared] completeWithMessages:_messages
                                             tools:_toolSchema
                                        completion:^(NSDictionary *json, NSString *text, NSString *error) {
@@ -811,7 +931,7 @@ static NSString *IOSDebHumanTool(NSString *name) {
 
         NSArray *toolCalls = json[@"tool_calls"];
         if (![toolCalls isKindOfClass:[NSArray class]] || toolCalls.count == 0) {
-            NSInteger estDone = self->_currentStep / 2;
+            NSInteger estDone = self->_completedRounds;
             if (self->_isSkillRun && self->_targetRounds > 0 && estDone < self->_targetRounds && self->_currentStep < effectiveLimit) {
                 IOSDebLog(@"[agent] Model attempted early exit at %ld/%ld rounds, nudging to continue...",
                           (long)estDone, (long)self->_targetRounds);
@@ -943,6 +1063,7 @@ static NSString *IOSDebHumanTool(NSString *name) {
     NSString *bundleId = dict[@"frontmost"][@"bundleId"] ?: @"";
     NSArray *elems = dict[@"elements"];
     if (![elems isKindOfClass:[NSArray class]]) return @"";
+    _lastElements = [elems copy];
 
     if (!_cachedElementCenters) _cachedElementCenters = [NSMutableDictionary dictionary];
     [_cachedElementCenters removeAllObjects];
@@ -1014,8 +1135,9 @@ static NSString *IOSDebHumanTool(NSString *name) {
     if (attempt == 1) {
         if (name.length && [name isEqualToString:self->_lastActionName] && [args isEqualToDictionary:self->_lastActionArgs]) {
             self->_consecutiveSameActionCount++;
-            if (self->_consecutiveSameActionCount >= 4) {
-                IOSDebLog(@"[agent] circuit breaker triggered: repeated action %@ 4 times", name);
+            NSInteger maxRepeats = self->_isSkillRun ? 8 : 4;
+            if (self->_consecutiveSameActionCount >= maxRepeats) {
+                IOSDebLog(@"[agent] circuit breaker triggered: repeated action %@ %ld times", name, (long)maxRepeats);
                 [self finish:IOSDebAgentEndFailed message:[NSString stringWithFormat:@"检测到重复操作「%@」死循环，已自动保护性停止", IOSDebHumanTool(name)]];
                 return;
             }
@@ -1109,8 +1231,9 @@ static NSString *IOSDebHumanTool(NSString *name) {
             if (sig.length > 0) {
                 if ([sig isEqualToString:self->_lastScreenSig]) {
                     self->_stagnantScreenCount++;
-                    if (self->_stagnantScreenCount >= 4) {
-                        IOSDebLog(@"[agent] circuit breaker triggered: screen stagnant for 4 cycles");
+                    NSInteger maxStagnant = self->_isSkillRun ? 8 : 4;
+                    if (self->_stagnantScreenCount >= maxStagnant) {
+                        IOSDebLog(@"[agent] circuit breaker triggered: screen stagnant for %ld cycles", (long)maxStagnant);
                         [self finish:IOSDebAgentEndFailed message:@"检测到页面持续无响应/无变化，已自动保护性停止"];
                         return;
                     }
@@ -1144,7 +1267,7 @@ static NSString *IOSDebHumanTool(NSString *name) {
         // Auto-Observe after the last UI action in a batch: wait 0.08s for UI
         // transition in skill mode (0.20s in normal mode), capture compact screen + @(x,y) centers!
         if (isLastInBatch && [self isUIActionTool:name]) {
-            NSTimeInterval settleTime = self->_isSkillRun ? 0.08 : 0.20;
+            NSTimeInterval settleTime = self->_isSkillRun ? 0.18 : 0.25;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(settleTime * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
                 if (!self->_running || self->_cancelled) return;
@@ -1172,7 +1295,7 @@ static NSString *IOSDebHumanTool(NSString *name) {
                             }
                         }
                         if (compact.length > 0) {
-                            NSInteger estDone = (self->_currentStep + 1) / 2;
+                            NSInteger estDone = self->_completedRounds;
                             NSString *progressTag = (self->_targetRounds > 0)
                                 ? [NSString stringWithFormat:@"已完成约 %ld/%ld 轮", (long)estDone, (long)self->_targetRounds]
                                 : [NSString stringWithFormat:@"已执行 %ld 步", (long)self->_currentStep];
@@ -1219,6 +1342,142 @@ static NSString *IOSDebHumanTool(NSString *name) {
         }
     }
     return ms;
+}
+
+
+- (void)executeFastBypassMatch:(IOSDebBypassMatch *)match {
+    if (_cancelled || !_running) return;
+
+    _currentStep += 1;
+    _bypassHitCount += 1;
+
+    IOSDebAgentStep *step = [[IOSDebAgentStep alloc] init];
+    step.index = _currentStep;
+    step.toolName = @"tap_screen";
+    step.title = @"词库直切";
+    step.detail = [NSString stringWithFormat:@"%@ -> %@ ⚡@(%.0f,%.0f)",
+                   match.englishWord, match.matchedOptionText, match.optionPoint.x, match.optionPoint.y];
+    step.ok = YES;
+    step.duration = 0.08;
+    [self emit:IOSDebAgentEventStep step:step message:nil];
+
+    IOSDebLog(@"[agent] ⚡ Fast-Bypass [%ld/%ld]: %@ -> %@ @(%.0f,%.0f) (conf: %.2f)",
+              (long)_bypassHitCount, (long)_targetRounds,
+              match.englishWord, match.matchedOptionText, match.optionPoint.x, match.optionPoint.y, match.confidence);
+
+    __weak typeof(self) weakSelf = self;
+    IOSDebQuizFingerprint *baseline = [[IOSDebLexicon shared] quizFingerprintOnElements:_lastElements];
+    [[IOSDebMCPClient shared] callTool:@"tap_screen"
+                             arguments:@{@"x": @(match.optionPoint.x), @"y": @(match.optionPoint.y)}
+                            completion:^(id res, NSString *err) {
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self || self->_cancelled || !self->_running) return;
+        [self awaitNewQuestionAfterMatch:match baseline:baseline attempt:0 didTapNext:NO];
+    }];
+}
+
+/// Polls the screen after a correct option was tapped. A new English word, or
+/// the same word with a different option set, means the app advanced by itself.
+/// Only a confirmed unchanged question earns a single「下一题」tap.
+- (void)awaitNewQuestionAfterMatch:(IOSDebBypassMatch *)match
+                          baseline:(IOSDebQuizFingerprint *)baseline
+                           attempt:(NSInteger)attempt
+                        didTapNext:(BOOL)didTapNext {
+    if (_cancelled || !_running) return;
+
+    const NSInteger kMaxPolls = 4;
+    const NSTimeInterval kPollInterval = 0.3;
+
+    NSString *baselineSignature = baseline.signature;
+    NSString *baselineWord = baseline.englishWord.length ? baseline.englishWord : match.englishWord.lowercaseString;
+
+    __weak typeof(self) weakSelf = self;
+    [[IOSDebMCPClient shared] callTool:@"describe_screen" arguments:@{}
+                            completion:^(id scrRes, NSString *scrErr) {
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self || self->_cancelled || !self->_running) return;
+
+        NSDictionary *scrDict = [self dictionaryFromToolResult:scrRes];
+        if (scrErr || !scrDict) {
+            if (attempt < 1) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kPollInterval * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    [self awaitNewQuestionAfterMatch:match baseline:baseline attempt:attempt + 1 didTapNext:didTapNext];
+                });
+                return;
+            }
+            [self finish:IOSDebAgentEndFailed
+                 message:[NSString stringWithFormat:@"读取答题页失败：%@", scrErr ?: @"无返回"]];
+            return;
+        }
+
+        [self compactScreenFromResult:scrDict];
+        IOSDebQuizFingerprint *fp = [[IOSDebLexicon shared] quizFingerprintOnElements:self->_lastElements];
+        BOOL advanced = NO;
+        if (fp && fp.englishWord.length > 0) {
+            if (baselineSignature.length) {
+                advanced = ![fp.signature isEqualToString:baselineSignature];
+            } else {
+                // Without a full baseline, only a different word proves progress.
+                advanced = ![fp.englishWord isEqualToString:baselineWord];
+            }
+        }
+
+        if (advanced) {
+            [self completeQuizRoundAndContinue];
+            return;
+        }
+
+        if (attempt + 1 < kMaxPolls) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kPollInterval * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                [self awaitNewQuestionAfterMatch:match baseline:baseline attempt:attempt + 1 didTapNext:didTapNext];
+            });
+            return;
+        }
+
+        if (didTapNext) {
+            [self finish:IOSDebAgentEndFailed message:@"点击下一题后仍未切题"];
+            return;
+        }
+
+        if (!fp) {
+            [self finish:IOSDebAgentEndFailed message:@"答对后无法识别答题页面，已停止"];
+            return;
+        }
+
+        BOOL hasNext = fp ? fp.hasNextButton : match.hasNextButton;
+        CGPoint nextPoint = fp ? fp.nextButtonPoint : match.nextButtonPoint;
+        if (!hasNext) {
+            [self finish:IOSDebAgentEndFailed message:@"答对后页面未切题且无下一题按钮"];
+            return;
+        }
+
+        self->_currentStep += 1;
+        IOSDebAgentStep *nextStep = [[IOSDebAgentStep alloc] init];
+        nextStep.index = self->_currentStep;
+        nextStep.toolName = @"tap_screen";
+        nextStep.title = @"下一题";
+        nextStep.detail = [NSString stringWithFormat:@"@(%.0f,%.0f)", nextPoint.x, nextPoint.y];
+        nextStep.ok = YES;
+        nextStep.duration = 0.08;
+        [self emit:IOSDebAgentEventStep step:nextStep message:nil];
+        IOSDebLog(@"[agent] confirmed unchanged question, tapping next once (word=%@)", match.englishWord);
+
+        [[IOSDebMCPClient shared] callTool:@"tap_screen"
+                                 arguments:@{@"x": @(nextPoint.x), @"y": @(nextPoint.y)}
+                                completion:^(id nRes, NSString *nErr) {
+            __strong typeof(weakSelf) sSelf = weakSelf;
+            if (!sSelf || sSelf->_cancelled || !sSelf->_running) return;
+            [sSelf awaitNewQuestionAfterMatch:match baseline:baseline attempt:0 didTapNext:YES];
+        }];
+    }];
+}
+
+- (void)completeQuizRoundAndContinue {
+    // Counting and the target check live in stepLoop, which sees the next
+    // fingerprint exactly once per question.
+    [self stepLoop];
 }
 
 - (void)finish:(IOSDebAgentEndReason)reason message:(NSString *)message {

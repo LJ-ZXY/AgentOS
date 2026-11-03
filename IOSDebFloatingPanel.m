@@ -1035,8 +1035,15 @@ static NSString *const kPosYKey = @"ui.barY";
     NSString *finalStatus = message ?: @"";
     if (ok && completedRounds > 0 && elapsed > 0) {
         double avg = elapsed / (double)completedRounds;
-        finalStatus = [NSString stringWithFormat:@"已完成 %ld 轮 · 耗时 %.1fs · 均速 %.2fs/轮",
-                       (long)completedRounds, elapsed, avg];
+        NSInteger bypassHits = agent.bypassHitCount;
+        if (bypassHits > 0) {
+            NSInteger pct = (NSInteger)llround(100.0 * bypassHits / completedRounds);
+            finalStatus = [NSString stringWithFormat:@"已完成 %ld 轮 · 本地直切 %ld 轮 (%ld%%) · 耗时 %.1fs · 均速 %.2fs/轮",
+                           (long)completedRounds, (long)bypassHits, (long)pct, elapsed, avg];
+        } else {
+            finalStatus = [NSString stringWithFormat:@"已完成 %ld 轮 · 耗时 %.1fs · 均速 %.2fs/轮",
+                           (long)completedRounds, elapsed, avg];
+        }
     }
 
     [self setStatus:finalStatus color:(ok ? [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1]
