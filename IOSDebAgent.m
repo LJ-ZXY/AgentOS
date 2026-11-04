@@ -904,7 +904,19 @@ static NSString *IOSDebHumanTool(NSString *name) {
             _quizMissCount = 0;
         } else if (_quizPageSeen) {
             _quizMissCount += 1;
-            IOSDebLog(@"[agent] quiz miss count: %ld/8", (long)_quizMissCount);
+            NSMutableString *summary = [NSMutableString string];
+            for (NSUInteger i = 0; i < MIN((NSUInteger)6, self->_lastElements.count); i++) {
+                NSDictionary *el = self->_lastElements[i];
+                if (el[@"text"]) [summary appendFormat:@"\"%@\" ", el[@"text"]];
+            }
+            IOSDebLog(@"[agent] quiz miss count: %ld/8 (visible: %@)", (long)_quizMissCount, summary);
+            if (_quizMissCount == 4) {
+                IOSDebLog(@"[agent] quiz miss count reached 4, refreshing screen snapshot to attempt recovery...");
+                [[IOSDebMCPClient shared] callTool:@"describe_screen" arguments:@{} completion:^(id sRes, NSString *sErr) {
+                    NSDictionary *sDict = [self dictionaryFromToolResult:sRes];
+                    if (sDict) [self compactScreenFromResult:sDict];
+                }];
+            }
             if (_quizMissCount >= 8) {
                 [self finish:IOSDebAgentEndFailed message:@"连续 8 次未识别到答题页面，已停止"];
                 return;

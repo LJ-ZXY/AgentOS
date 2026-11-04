@@ -94,13 +94,20 @@ static NSString *IOSDebResolveLexiconPath(void) {
     if (!word.length) return @"";
     NSString *trimmed = [word stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].lowercaseString;
     NSMutableString *ms = [NSMutableString string];
+    BOOL lastWasSpace = NO;
     for (NSUInteger i = 0; i < trimmed.length; i++) {
         unichar c = [trimmed characterAtIndex:i];
-        if ((c >= 'a' && c <= 'z') || c == '-') {
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '/') {
             [ms appendFormat:@"%C", c];
+            lastWasSpace = NO;
+        } else if (c == ' ' || c == '\t') {
+            if (!lastWasSpace && ms.length > 0) {
+                [ms appendString:@" "];
+                lastWasSpace = YES;
+            }
         }
     }
-    return ms;
+    return [ms stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
 }
 
 - (NSString *)lemmatizeWord:(NSString *)word {
@@ -352,8 +359,10 @@ static NSSet *IOSDebIgnoredQuizTexts(void) {
         }
 
         // Target English word: pure letters, upper-middle area (cy < 350)
-        NSRange enRange = [cleanTrim rangeOfString:@"^[a-zA-Z\\-]+$" options:NSRegularExpressionSearch];
-        if (enRange.location != NSNotFound && cleanTrim.length >= 2 && cleanTrim.length <= 25 && cy < 350) {
+        NSRange enRange = [cleanTrim rangeOfString:@"^[a-zA-Z0-9\\-\\s/]+$" options:NSRegularExpressionSearch];
+        BOOL hasLetter = [cleanTrim rangeOfCharacterFromSet:[NSCharacterSet letterCharacterSet]].location != NSNotFound;
+        BOOL endsWithPunct = [cleanTrim hasSuffix:@"."] || [cleanTrim hasSuffix:@"!"] || [cleanTrim hasSuffix:@"?"] || [cleanTrim hasSuffix:@"。"];
+        if (enRange.location != NSNotFound && hasLetter && !endsWithPunct && cleanTrim.length >= 2 && cleanTrim.length <= 35 && cy < 350) {
             [wordCandidates addObject:el];
         }
     }
@@ -451,8 +460,10 @@ static NSSet *IOSDebIgnoredQuizTexts(void) {
             continue;
         }
 
-        NSRange enRange = [cleanTrim rangeOfString:@"^[a-zA-Z\\-]+$" options:NSRegularExpressionSearch];
-        if (enRange.location != NSNotFound && cleanTrim.length >= 2 && cleanTrim.length <= 25 && cy < 350) {
+        NSRange enRange = [cleanTrim rangeOfString:@"^[a-zA-Z0-9\\-\\s/]+$" options:NSRegularExpressionSearch];
+        BOOL hasLetter = [cleanTrim rangeOfCharacterFromSet:[NSCharacterSet letterCharacterSet]].location != NSNotFound;
+        BOOL endsWithPunct = [cleanTrim hasSuffix:@"."] || [cleanTrim hasSuffix:@"!"] || [cleanTrim hasSuffix:@"?"] || [cleanTrim hasSuffix:@"。"];
+        if (enRange.location != NSNotFound && hasLetter && !endsWithPunct && cleanTrim.length >= 2 && cleanTrim.length <= 35 && cy < 350) {
             [wordCandidates addObject:el];
         }
     }
