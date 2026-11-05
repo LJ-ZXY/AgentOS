@@ -6,6 +6,9 @@
 #import "IOSDebStore.h"
 #import "IOSDebLog.h"
 #import "IOSDebLexicon.h"
+#import "IOSDebQuizState.h"
+#import "IOSDebFloatingPanel.h"
+#import <float.h>
 
 NSString *const IOSDebAgentEventStep = @"step";
 NSString *const IOSDebAgentEventDone = @"done";
@@ -183,6 +186,23 @@ static NSString *IOSDebHumanTool(NSString *name) {
     BOOL _quizPageSeen;
     NSString *_lastQuizWord;
     NSInteger _wrongAnswerHandlingCount;
+    IOSDebQuizState *_quizState;
+    BOOL _quizMode;
+    NSInteger _cloudCount;
+    NSString *_fallbackReason;
+    NSString *_loggedQuestionID;
+    NSString *_loggedDecisionKey;
+    NSUInteger _runGeneration;
+    NSInteger _quizNoProgressCount;
+    double _quizScreenWidth;
+    double _quizScreenHeight;
+    IOSDebQuizObservation *_lastQuizObservation;
+    NSArray<NSDictionary *> *_priorQuizElements;
+    NSString *_quizFrontmost;
+    NSString *_quizAppName;
+    BOOL _controlledResultScroll;
+    NSInteger _overlayFilteredCount;
+    NSString *_loggedAnomalySummary;
 }
 
 @synthesize customStepLimit = _customStepLimit;
@@ -757,13 +777,23 @@ static NSString *IOSDebHumanTool(NSString *name) {
     _llmRetryCount = 0;
     _cachedElementCenters = [NSMutableDictionary dictionary];
     _isSkillRun = [instruction containsString:@"已保存的技能"];
+    _quizMode = _isSkillRun && [instruction containsString:@"英语单词选择练习"];
+    [[IOSDebFloatingPanel shared] setQuizAccessibilityExcluded:_quizMode];
+    _quizState = [[IOSDebQuizState alloc] initWithRunID:NSUUID.UUID.UUIDString];
+    _runGeneration++;
+    _cloudCount = 0; _fallbackReason = @"入口导航"; _loggedQuestionID = nil; _loggedDecisionKey = nil;
     _bypassHitCount = 0;
     _completedRounds = 0;
     _quizMissCount = 0;
     _quizPageSeen = NO;
+    _quizNoProgressCount = 0; _quizScreenWidth = 390; _quizScreenHeight = 844;
     _lastQuizWord = nil;
     _wrongAnswerHandlingCount = 0;
     _lastElements = nil;
+    _priorQuizElements = nil; _lastQuizObservation = nil; _quizFrontmost = nil;
+    _quizAppName = nil;
+    _controlledResultScroll = NO; _overlayFilteredCount = 0;
+    _loggedAnomalySummary = nil;
     [[IOSDebLexicon shared] preloadIfNeeded];
     _targetRounds = 0;
     if (_isSkillRun) {
@@ -810,9 +840,7 @@ static NSString *IOSDebHumanTool(NSString *name) {
     IOSDebLog(@"[agent] context carried %lu prior messages (isSkillRun=%d)",
               (unsigned long)history.count, (int)_isSkillRun);
 
-    IOSDebLog(@"[agent] start model=%@ endpoint=%@ stepLimit=%ld keyLen=%lu",
-              store.model, store.apiBaseURL, (long)store.stepLimit,
-              (unsigned long)store.apiKey.length);
+    [self quizEvent:@"run_start" fields:@{@"reason": @"start"}];
 
     [self emit:IOSDebAgentEventStep step:nil message:@"开始执行"];
 
@@ -837,11 +865,10 @@ static NSString *IOSDebHumanTool(NSString *name) {
         IOSDebLog(@"[agent] loaded %lu tool schemas", (unsigned long)self->_toolSchema.count);
         // Pre-attach current screen snapshot + center coordinates @(x,y) so the
         // first LLM turn can immediately act without wasting a describe_screen turn.
-        [[IOSDebMCPClient shared] callTool:@"describe_screen"
-                                 arguments:@{}
-                                completion:^(id scrRes, NSString *scrErr) {
+        [self readQuizScreen:0 completion:^(NSDictionary *scrRes, NSString *scrErr) {
             __strong typeof(weakSelf) sSelf = weakSelf;
             if (!sSelf || sSelf->_cancelled) return;
+            if (scrErr) { [sSelf finish:IOSDebAgentEndFailed message:scrErr]; return; }
             NSDictionary *scrDict = [sSelf dictionaryFromToolResult:scrRes];
             if (!scrErr && scrDict) {
                 NSString *compact = [sSelf compactScreenFromResult:scrDict];
@@ -871,68 +898,80 @@ static NSString *IOSDebHumanTool(NSString *name) {
         return;
     }
 
-    // --- Fast-Bypass Check: Generalized Word Meaning Match ---
-    if (_isSkillRun && _lastElements.count > 0) {
-        if ([self isWrongAnswerScreenOnElements:_lastElements]) {
-            [self handleWrongAnswerScreenWithCompletion:^{
-                [self stepLoop];
-            }];
+    if (_quizMode) {
+        IOSDebQuizFingerprint *fp = [[IOSDebLexicon shared] quizFingerprintOnElements:_lastElements];
+        NSString *feedback = [IOSDebQuizState feedbackOnElements:_lastElements];
+        if (!_quizPageSeen && feedback.length) {
+            _quizPageSeen = YES;
+            [_quizState beginEntryRecovery:[[IOSDebLexicon shared] quizObservationOnElements:_lastElements].identityFingerprint];
+            [self observeQuiz:fp feedback:feedback];
+            [self quizEvent:@"entry_recovery" fields:@{@"feedback": feedback}];
+            [self pollQuiz:0 afterNext:NO completion:^{ [self stepLoop]; }];
             return;
         }
-
-        IOSDebQuizFingerprint *fp = [[IOSDebLexicon shared] quizFingerprintOnElements:_lastElements];
-        if (fp && fp.englishWord.length > 0) {
-            _wrongAnswerHandlingCount = 0;
-            _quizPageSeen = YES;
-            NSString *currentWord = fp.englishWord.lowercaseString;
-            if (_lastQuizWord.length > 0 && ![currentWord isEqualToString:_lastQuizWord]) {
-                _completedRounds += 1;
-                IOSDebLog(@"[agent] 🎯 Question completed (%@ -> %@)! Total: %ld/%ld",
-                          _lastQuizWord, currentWord, (long)_completedRounds, (long)_targetRounds);
-                if (_targetRounds > 0 && _completedRounds >= _targetRounds) {
-                    _lastQuizWord = [currentWord copy];
-                    [self finish:IOSDebAgentEndCompleted
-                         message:[NSString stringWithFormat:@"已完成目标 %ld 轮「英语单词选择练习」，练习顺利结束。",
-                                  (long)_targetRounds]];
+        if (_quizState.optionSent || _quizState.entryRecovery) {
+            [self pollQuiz:0 afterNext:_quizState.nextSent completion:^{ [self stepLoop]; }];
+            return;
+        }
+        if (fp) {
+            _quizPageSeen = YES; _quizMissCount = 0;
+            [self observeQuiz:fp feedback:feedback];
+            if ([self finishIfQuizTarget]) return;
+            if (![_quizState.fingerprint.signature isEqual:fp.signature]) {
+                [self pollQuiz:0 afterNext:NO completion:^{ [self stepLoop]; }];
+                return;
+            }
+            NSDictionary *decision = [[IOSDebLexicon shared] decisionOnFingerprint:fp];
+            _fallbackReason = decision[@"reason"];
+            NSString *key = [NSString stringWithFormat:@"%@/%@", _quizState.questionID, _fallbackReason];
+            if (![_loggedDecisionKey isEqual:key]) {
+                _loggedDecisionKey = key;
+                [self quizEvent:@"local_decision" fields:@{@"decision": decision, @"reason": _fallbackReason}];
+            }
+            if ([_fallbackReason isEqual:@"本地命中"]) {
+                for (NSDictionary *el in fp.optionElements) {
+                    if (![el[@"text"] isEqual:decision[@"winner"]]) continue;
+                    NSDictionary *r = el[@"rect"];
+                    IOSDebBypassMatch *match = [IOSDebBypassMatch new];
+                    match.englishWord = fp.englishWord; match.matchedOptionText = el[@"text"];
+                    match.optionPoint = CGPointMake([r[@"x"] doubleValue] + [r[@"width"] doubleValue]/2,
+                                                   [r[@"y"] doubleValue] + [r[@"height"] doubleValue]/2);
+                    match.confidence = [decision[@"score"] doubleValue];
+                    [self executeFastBypassMatch:match];
                     return;
                 }
             }
-            _lastQuizWord = [currentWord copy];
-            if (_quizMissCount > 0) {
-                IOSDebLog(@"[agent] quiz recognisable again, clearing miss count (was %ld)", (long)_quizMissCount);
-            }
-            _quizMissCount = 0;
         } else if (_quizPageSeen) {
-            _quizMissCount += 1;
-            NSMutableString *summary = [NSMutableString string];
-            for (NSUInteger i = 0; i < MIN((NSUInteger)6, self->_lastElements.count); i++) {
-                NSDictionary *el = self->_lastElements[i];
-                if (el[@"text"]) [summary appendFormat:@"\"%@\" ", el[@"text"]];
-            }
-            IOSDebLog(@"[agent] quiz miss count: %ld/8 (visible: %@)", (long)_quizMissCount, summary);
-            if (_quizMissCount == 4) {
-                IOSDebLog(@"[agent] quiz miss count reached 4, refreshing screen snapshot to attempt recovery...");
-                [[IOSDebMCPClient shared] callTool:@"describe_screen" arguments:@{} completion:^(id sRes, NSString *sErr) {
-                    NSDictionary *sDict = [self dictionaryFromToolResult:sRes];
-                    if (sDict) [self compactScreenFromResult:sDict];
-                }];
-            }
-            if (_quizMissCount >= 8) {
-                [self finish:IOSDebAgentEndFailed message:@"连续 8 次未识别到答题页面，已停止"];
+            IOSDebQuizPagePhase phase = [[IOSDebLexicon shared] quizPhaseOnElements:_lastElements];
+            if (phase == IOSDebQuizPageOther) _quizMissCount++;
+            else _quizNoProgressCount++;
+            [self quizEvent:@"quiz_unrecognised" fields:@{@"missCount": @(_quizMissCount), @"reason": @"答题页未识别",
+                @"screenSummary": [self quizScreenSummary]}];
+            if (_quizMissCount >= 8 || _quizNoProgressCount >= 8) {
+                [self finish:IOSDebAgentEndFailed message:phase == IOSDebQuizPageOther ? @"连续 8 次未识别到答题页面，已停止" : @"页面连续 8 次恢复仍无进展，已停止"];
                 return;
             }
-        }
-
-        IOSDebBypassMatch *match = [[IOSDebLexicon shared] evaluateWordMeaningMatchOnElements:_lastElements];
-        if (match && match.confidence >= 0.75) {
-            [self executeFastBypassMatch:match];
+            [self readQuizScreen:0 completion:^(NSDictionary *screen, NSString *error) {
+                if (error) { [self finish:IOSDebAgentEndFailed message:error]; return; }
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{ if (self->_running) [self stepLoop]; });
+            }];
             return;
-        }
+        } else _fallbackReason = @"答题页未识别";
     }
 
+    NSInteger cloudSequence = ++_cloudCount;
+    NSDate *cloudStart = [NSDate date];
+    NSUInteger cloudGeneration = _runGeneration;
+    if (_quizMode) [self syncQuizCloudSnapshot];
+    [self quizEvent:@"cloud_request" fields:@{@"sequence": @(cloudSequence), @"reason": _fallbackReason ?: @"normal",
+        @"snapshotFingerprint": _quizMode ? (_lastQuizObservation.identityFingerprint.signature ?: @"") : @"",
+        @"phase": @([[IOSDebLexicon shared] quizPhaseOnElements:_lastElements])}];
     [[IOSDebLLMClient shared] completeWithMessages:_messages
                                             tools:_toolSchema
                                        completion:^(NSDictionary *json, NSString *text, NSString *error) {
+        if (!self->_running || self->_runGeneration != cloudGeneration) return;
+        [self quizEvent:@"cloud_response" fields:@{@"sequence": @(cloudSequence), @"duration": @(-[cloudStart timeIntervalSinceNow]), @"error": error ? [IOSDebStore redacted:error] : @""}];
         if (self->_cancelled) { [self finish:IOSDebAgentEndStopped message:@"已停止"]; return; }
         if (error) {
             if (self->_isSkillRun && self->_llmRetryCount < 3) {
@@ -966,13 +1005,16 @@ static NSString *IOSDebHumanTool(NSString *name) {
                 }];
                 [self->_messages addObject:@{
                     @"role": @"user",
-                    @"content": [NSString stringWithFormat:@"当前仅完成约 %ld 轮，未达到预定目标 %ld 轮，请继续查看当前屏幕选项并输出点击工具！",
+                    @"content": [NSString stringWithFormat:@"当前仅完成 %ld 轮，未达到预定目标 %ld 轮，请继续查看当前屏幕选项并输出点击工具！",
                                  (long)estDone, (long)self->_targetRounds]
                 }];
                 [self stepLoop];
                 return;
             }
-            NSString *finalText = text.length ? text : @"已完成";
+            if (self->_quizMode && self->_completedRounds == 0) {
+                [self finish:IOSDebAgentEndFailed message:@"未确认任何作答完成，模型已停止"]; return;
+            }
+            NSString *finalText = self->_quizMode ? [NSString stringWithFormat:@"已完成 %ld 轮", (long)self->_completedRounds] : (text.length ? text : @"已完成");
             [self finish:IOSDebAgentEndCompleted message:finalText];
             return;
         }
@@ -997,25 +1039,7 @@ static NSString *IOSDebHumanTool(NSString *name) {
                  content:(NSString *)content ok:(BOOL)ok {
     NSString *marker = @"[动作执行后自动刷新屏幕";
     if ([content containsString:marker]) {
-        if (_isSkillRun && _messages.count > 3) {
-            // Ultra-compact rolling window for skills: keep system prompt, initial user prompt,
-            // and the latest assistant tool call. Input tokens stay <250 throughout 50+ rounds!
-            NSDictionary *lastAssistant = nil;
-            for (NSInteger i = (NSInteger)_messages.count - 1; i >= 0; i--) {
-                if ([_messages[(NSUInteger)i][@"role"] isEqualToString:@"assistant"]) {
-                    lastAssistant = _messages[(NSUInteger)i];
-                    break;
-                }
-            }
-            if (lastAssistant) {
-                NSDictionary *sysMsg = _messages[0];
-                NSDictionary *userMsg = _messages.count > 1 ? _messages[1] : nil;
-                NSMutableArray *compact = [NSMutableArray arrayWithObject:sysMsg];
-                if (userMsg) [compact addObject:userMsg];
-                [compact addObject:lastAssistant];
-                _messages = compact;
-            }
-        } else {
+        {
             // Sliding window: strip stale screen snapshots from older tool results
             NSUInteger keptSnapshots = 0;
             for (NSInteger i = (NSInteger)_messages.count - 1; i >= 0; i--) {
@@ -1088,7 +1112,18 @@ static NSString *IOSDebHumanTool(NSString *name) {
     NSString *bundleId = dict[@"frontmost"][@"bundleId"] ?: @"";
     NSArray *elems = dict[@"elements"];
     if (![elems isKindOfClass:[NSArray class]]) return @"";
+    if (_quizMode) {
+        NSArray *filtered = [IOSDebLexicon filterElements:elems overlayDescriptors:[[IOSDebFloatingPanel shared] quizOverlayDescriptors]];
+        _overlayFilteredCount = dict[@"_quizFilteredCount"] ? [dict[@"_quizFilteredCount"] integerValue] : elems.count - filtered.count;
+        elems = filtered;
+        if (dict[@"frontmost"]) { _quizFrontmost = [bundleId copy]; _quizAppName = [appName copy]; }
+        _priorQuizElements = _lastElements;
+        _lastQuizObservation = [[IOSDebLexicon shared] quizObservationOnElements:elems];
+    }
     _lastElements = [elems copy];
+    NSDictionary *screen = dict[@"screen"];
+    if ([screen[@"width"] doubleValue] > 0) _quizScreenWidth = [screen[@"width"] doubleValue];
+    if ([screen[@"height"] doubleValue] > 0) _quizScreenHeight = [screen[@"height"] doubleValue];
 
     if (!_cachedElementCenters) _cachedElementCenters = [NSMutableDictionary dictionary];
     [_cachedElementCenters removeAllObjects];
@@ -1139,6 +1174,17 @@ static NSString *IOSDebHumanTool(NSString *name) {
         return;
     }
 
+    if (_quizMode && _quizPageSeen && [self isUIActionTool:name]) {
+        [self executeQuizCloudTool:name args:args callID:callID calls:toolCalls index:idx];
+        return;
+    }
+    if (_quizMode && [self isUIActionTool:name]) {
+        [_messages addObjectsFromArray:[IOSDebQuizState cancelledCalls:toolCalls afterIndex:idx]];
+        [self executeSingleTool:name args:args callID:callID isLastInBatch:YES attempt:1 completion:^{
+            [self stepLoop];
+        }];
+        return;
+    }
     BOOL isLast = (idx + 1 >= toolCalls.count);
     __weak typeof(self) weakSelf = self;
     [self executeSingleTool:name args:args callID:callID isLastInBatch:isLast attempt:1 completion:^{
@@ -1275,7 +1321,7 @@ static NSString *IOSDebHumanTool(NSString *name) {
 
         if (!step.ok) {
             [self appendToolResult:callID name:name content:trimmed ok:NO];
-            if (attempt < 2 && [IOSDebAllowedTools() containsObject:name]) {
+            if (attempt < 2 && ![self isUIActionTool:name] && [IOSDebAllowedTools() containsObject:name]) {
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
                                              (int64_t)(0.8 * NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
@@ -1296,11 +1342,13 @@ static NSString *IOSDebHumanTool(NSString *name) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(settleTime * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
                 if (!self->_running || self->_cancelled) return;
-                [[IOSDebMCPClient shared] callTool:@"describe_screen"
-                                         arguments:@{}
-                                        completion:^(id scrRes, NSString *scrErr) {
+                [self readQuizScreen:0 completion:^(NSDictionary *scrRes, NSString *scrErr) {
                     if (self->_cancelled) { [self finish:IOSDebAgentEndStopped message:@"已停止"]; return; }
                     NSString *combined = trimmed;
+                    if (scrErr) {
+                        [self appendToolResult:callID name:name content:[NSString stringWithFormat:@"%@；%@", combined, scrErr] ok:YES];
+                        [self finish:IOSDebAgentEndFailed message:scrErr]; return;
+                    }
                     NSDictionary *scrDict = [self dictionaryFromToolResult:scrRes];
                     if (!scrErr && scrDict) {
                         NSString *compact = [self compactScreenFromResult:scrDict];
@@ -1357,6 +1405,7 @@ static NSString *IOSDebHumanTool(NSString *name) {
     if (!dict) return @"";
     NSString *bundle = dict[@"frontmost"][@"bundleId"] ?: @"";
     NSArray *elems = dict[@"elements"];
+    if (_quizMode && [elems isKindOfClass:NSArray.class]) elems = [IOSDebLexicon filterElements:elems overlayDescriptors:[[IOSDebFloatingPanel shared] quizOverlayDescriptors]];
     NSUInteger count = [elems isKindOfClass:[NSArray class]] ? elems.count : 0;
     NSMutableString *ms = [NSMutableString stringWithFormat:@"%@_%lu_", bundle, (unsigned long)count];
     if ([elems isKindOfClass:[NSArray class]]) {
@@ -1370,272 +1419,446 @@ static NSString *IOSDebHumanTool(NSString *name) {
     return ms;
 }
 
-- (BOOL)isWrongAnswerScreenOnElements:(NSArray<NSDictionary *> *)elements {
-    if (![elements isKindOfClass:[NSArray class]]) return NO;
-    for (NSDictionary *el in elements) {
-        if (![el isKindOfClass:[NSDictionary class]]) continue;
-        NSString *txt = el[@"text"];
-        if ([txt isKindOfClass:[NSString class]]) {
-            if ([txt containsString:@"回答错误"] || [txt containsString:@"正确答案"] || [txt containsString:@"记忆解析"] || [txt containsString:@"词根拆解"]) {
-                return YES;
-            }
-        }
+- (void)quizEvent:(NSString *)event fields:(NSDictionary *)fields {
+    NSMutableDictionary *f = [NSMutableDictionary dictionary];
+    f[@"runId"] = _quizState.runID ?: @"";
+    f[@"questionId"] = _quizState.questionID ?: @"entry";
+    f[@"fingerprint"] = _quizState.fingerprint.signature ?: @"";
+    f[@"word"] = _quizState.fingerprint.englishWord ?: @"";
+    f[@"completedRounds"] = @(_quizState.completedRounds);
+    f[@"nextSent"] = @(_quizState.nextSent);
+    f[@"phase"] = @(_lastQuizObservation.phase);
+    f[@"observedWord"] = _lastQuizObservation.observedWord ?: @"";
+    f[@"observedFingerprint"] = _lastQuizObservation.identityFingerprint.signature ?: @"";
+    f[@"candidateCount"] = @(_lastQuizObservation.answerCandidates.count);
+    f[@"targetCandidateCount"] = @(_lastQuizObservation.englishCandidates.count);
+    f[@"pronunciationFilteredCount"] = @(_lastQuizObservation.pronunciationCandidates.count);
+    f[@"recognitionReason"] = _lastQuizObservation.recognitionReason ?: @"no_snapshot";
+    f[@"pageRelation"] = _quizState.pageRelation == IOSDebQuizPageSame ? @"same" : _quizState.pageRelation == IOSDebQuizPageNew ? @"new" : @"unknown";
+    f[@"overlayFilteredCount"] = @(_overlayFilteredCount);
+    f[@"noProgressCount"] = @(_quizNoProgressCount);
+    if (fields) [f addEntriesFromDictionary:fields];
+    if ([event isEqual:@"quiz_unrecognised"] && f[@"screenSummary"]) {
+        if ([_loggedAnomalySummary isEqual:f[@"screenSummary"]]) [f removeObjectForKey:@"screenSummary"];
+        else _loggedAnomalySummary = [f[@"screenSummary"] copy];
     }
-    return NO;
+    if ([event isEqual:@"question"]) _loggedAnomalySummary = nil;
+    [IOSDebLogging event:event fields:f];
 }
 
-- (BOOL)findNextButtonInElements:(NSArray<NSDictionary *> *)elements point:(CGPoint *)outPt {
-    if (![elements isKindOfClass:[NSArray class]]) return NO;
+- (NSString *)quizScreenSummary {
+    NSMutableArray *texts = [NSMutableArray array];
+    IOSDebQuizObservation *observation = _lastQuizObservation ?: [[IOSDebLexicon shared] quizObservationOnElements:_lastElements];
+    [texts addObjectsFromArray:observation.englishCandidates ?: @[]];
+    [texts addObjectsFromArray:observation.answerCandidates ?: @[]];
+    [texts addObjectsFromArray:observation.pronunciationCandidates ?: @[]];
+    for (NSDictionary *el in _lastElements) {
+        NSString *text = el[@"text"];
+        if (![text isKindOfClass:NSString.class]) continue;
+        if (![IOSDebLexicon isNextButtonText:text] && ![text containsString:@"回答"] &&
+            ![text containsString:@"正确答案"] && ![text containsString:@"记忆解析"] && ![text containsString:@"词根拆解"]) continue;
+        if ([texts containsObject:text]) continue;
+        [texts addObject:text.length > 60 ? [text substringToIndex:60] : text];
+        if (texts.count >= 8) break;
+    }
+    if (texts.count > 8) [texts removeObjectsInRange:NSMakeRange(8, texts.count-8)];
+    NSString *summary = [texts componentsJoinedByString:@" | "];
+    return summary.length > 360 ? [summary substringToIndex:360] : summary;
+}
+
+- (void)observeQuiz:(IOSDebQuizFingerprint *)fp feedback:(NSString *)feedback {
+    NSString *oldID = _quizState.questionID;
+    IOSDebQuizFingerprint *oldFP = _quizState.fingerprint;
+    BOOL selected = [IOSDebQuizState selectedOption:_quizState.selectedOption onElements:_lastElements];
+    _lastQuizObservation = [[IOSDebLexicon shared] quizObservationOnElements:_lastElements];
+    BOOL overlap = NO;
+    for (NSDictionary *current in _lastElements) {
+        NSString *text = current[@"text"];
+        if (![text isKindOfClass:NSString.class] || text.length < 3 || [IOSDebLexicon isNextButtonText:text] || [text containsString:@"上一题"] ||
+            [text isEqual:@"英语学习"] || [current[@"rect"][@"y"] doubleValue] <= 100) continue;
+        for (NSDictionary *prior in _priorQuizElements) {
+            if ([prior[@"text"] isEqual:text]) { overlap = YES; break; }
+        }
+        if (overlap) break;
+    }
+    BOOL continuous = _quizState.resultContinuation && (overlap ||
+        (_controlledResultScroll && _lastQuizObservation.phase == IOSDebQuizPageResult));
+    BOOL completed = [_quizState observePage:_lastQuizObservation feedback:feedback selected:selected
+                                 frontmost:_quizFrontmost ?: @"" continuous:continuous];
+    _controlledResultScroll = NO;
+    _completedRounds = _quizState.completedRounds;
+    if (completed || ![oldID isEqual:_quizState.questionID]) _quizNoProgressCount = 0;
+    if (completed) [self quizEvent:@"round_complete" fields:@{@"reason": feedback.length ? @"verified_answer_feedback" : @"submitted_question_transition", @"questionId": oldID ?: @"", @"fingerprint": oldFP.signature ?: @"", @"word": oldFP.englishWord ?: @""}];
+    if (_quizState.fingerprint && ![_loggedQuestionID isEqual:_quizState.questionID]) {
+        fp = _quizState.fingerprint;
+        _loggedQuestionID = _quizState.questionID;
+        [self quizEvent:@"question" fields:@{@"rawWord": fp.rawEnglishWord ?: fp.englishWord,
+                                             @"word": fp.englishWord, @"options": fp.optionTexts,
+                                             @"pronunciationCandidates": _lastQuizObservation.pronunciationCandidates ?: @[]}];
+    }
+}
+
+- (BOOL)finishIfQuizTarget {
+    if (_targetRounds <= 0 || _completedRounds < _targetRounds) return NO;
+    [self finish:IOSDebAgentEndCompleted message:[NSString stringWithFormat:@"已完成 %ld 轮「英语单词选择练习」", (long)_completedRounds]];
+    return YES;
+}
+
+- (void)readQuizScreen:(NSInteger)attempt completion:(void (^)(NSDictionary *, NSString *))completion {
+    NSUInteger generation = _runGeneration;
+    NSArray *before = _quizMode ? [[IOSDebFloatingPanel shared] quizOverlayDescriptors] : @[];
+    [[IOSDebMCPClient shared] callTool:@"describe_screen" arguments:@{} completion:^(id result, NSString *error) {
+        if (!self->_running || self->_runGeneration != generation) return;
+        if (self->_cancelled) { [self finish:IOSDebAgentEndStopped message:@"已停止"]; return; }
+        NSDictionary *dict = [self dictionaryFromToolResult:result];
+        if (!error && ![dict[@"elements"] isKindOfClass:NSArray.class]) error = @"屏幕读取缺少有效 elements";
+        if (error) {
+            self->_lastElements = nil; [self->_cachedElementCenters removeAllObjects];
+            self->_lastQuizObservation = [[IOSDebLexicon shared] quizObservationOnElements:@[]];
+            [self->_quizState observePage:self->_lastQuizObservation feedback:@"" selected:NO frontmost:self->_quizFrontmost ?: @"" continuous:NO];
+            [self quizEvent:@"screen_error" fields:@{@"attempt": @(attempt), @"error": [IOSDebStore redacted:error]}];
+            if (attempt == 0) { [self readQuizScreen:1 completion:completion]; return; }
+            completion(nil, [NSString stringWithFormat:@"读取屏幕失败（重试后）：%@", error]);
+            return;
+        }
+        if (self->_quizMode) {
+            NSArray *descriptors = [before arrayByAddingObjectsFromArray:[[IOSDebFloatingPanel shared] quizOverlayDescriptors]];
+            NSArray *elements = [IOSDebLexicon filterElements:dict[@"elements"] overlayDescriptors:descriptors];
+            NSMutableDictionary *filtered = [dict mutableCopy];
+            filtered[@"elements"] = elements;
+            filtered[@"_quizFilteredCount"] = @([dict[@"elements"] count] - elements.count);
+            dict = filtered;
+        }
+        [self compactScreenFromResult:dict];
+        completion(dict, nil);
+    }];
+}
+
+- (BOOL)findNextButtonInElements:(NSArray<NSDictionary *> *)elements point:(CGPoint *)point {
     for (NSDictionary *el in elements) {
-        if (![el isKindOfClass:[NSDictionary class]]) continue;
         NSString *t = el[@"text"];
-        if ([t isKindOfClass:[NSString class]] && [t containsString:@"下一题"]) {
-            NSDictionary *r = el[@"rect"];
-            if (r) {
-                if (outPt) {
-                    *outPt = CGPointMake([r[@"x"] doubleValue] + [r[@"width"] doubleValue] / 2.0,
-                                         [r[@"y"] doubleValue] + [r[@"height"] doubleValue] / 2.0);
-                }
-                return YES;
-            }
-        }
+        if (![IOSDebLexicon isNextButtonText:t] ||
+            (el[@"enabled"] && ![el[@"enabled"] boolValue])) continue;
+        NSDictionary *r = el[@"rect"];
+        if (![r isKindOfClass:NSDictionary.class] || [r[@"width"] doubleValue] <= 0 || [r[@"height"] doubleValue] <= 0) continue;
+        CGPoint center = CGPointMake([r[@"x"] doubleValue] + [r[@"width"] doubleValue]/2,
+                                     [r[@"y"] doubleValue] + [r[@"height"] doubleValue]/2);
+        if (center.x <= 0 || center.y <= 0 || center.x >= (_quizScreenWidth ?: 390) || center.y >= (_quizScreenHeight ?: 844)) continue;
+        if (point) *point = center;
+        return YES;
     }
     return NO;
 }
 
-- (void)handleWrongAnswerScreenWithCompletion:(void (^)(void))completion {
-    if (_cancelled || !_running) return;
-
-    _wrongAnswerHandlingCount += 1;
-    if (_wrongAnswerHandlingCount > 5) {
-        [self finish:IOSDebAgentEndFailed message:@"错题解析页面无法翻页，已停止"];
-        return;
-    }
-
-    CGPoint nextPt = CGPointZero;
-    if ([self findNextButtonInElements:_lastElements point:&nextPt]) {
-        IOSDebLog(@"[agent] wrong answer explanation detected, tapping 「下一题」 @(%.0f,%.0f)", nextPt.x, nextPt.y);
-        _currentStep += 1;
-        IOSDebAgentStep *step = [[IOSDebAgentStep alloc] init];
-        step.index = _currentStep;
-        step.toolName = @"tap_screen";
-        step.title = @"下一题";
-        step.detail = [NSString stringWithFormat:@"@(%.0f,%.0f) · 跳过解析", nextPt.x, nextPt.y];
-        step.ok = YES;
-        step.duration = 0.08;
+- (void)dispatchQuizTap:(CGPoint)point target:(NSString *)target source:(NSString *)source isNext:(BOOL)isNext receiptHandler:(void (^)(BOOL, NSString *))receiptHandler completion:(void (^)(void))completion {
+    if (!_running || _cancelled) return;
+    _currentStep++;
+    IOSDebAgentStep *step = [IOSDebAgentStep new];
+    step.index = _currentStep; step.toolName = @"tap_screen";
+    step.title = isNext ? @"下一题" : [source isEqual:@"local"] ? @"词库直切" : @"选择答案";
+    step.detail = [NSString stringWithFormat:@"%@ @(%.0f,%.0f)", target, point.x, point.y];
+    [self emit:IOSDebAgentEventStep step:step message:nil];
+    NSDictionary *coords = @{@"x": @(point.x), @"y": @(point.y)};
+    [self quizEvent:@"tap_before" fields:@{@"source": source, @"tool": @"tap_screen", @"target": target, @"point": coords}];
+    NSDate *start = [NSDate date];
+    NSUInteger generation = _runGeneration;
+    [[IOSDebMCPClient shared] callTool:@"tap_screen" arguments:coords completion:^(id receipt, NSString *error) {
+        if (!self->_running || self->_runGeneration != generation) return;
+        if (!error) error = [IOSDebQuizState receiptError:[self dictionaryFromToolResult:receipt]];
+        step.ok = error == nil; step.duration = -[start timeIntervalSinceNow];
+        if (!isNext) [self->_quizState acknowledgeOption:step.ok];
+        if (step.ok) self->_quizNoProgressCount = 0;
         [self emit:IOSDebAgentEventStep step:step message:nil];
-
-        __weak typeof(self) weakSelf = self;
-        [[IOSDebMCPClient shared] callTool:@"tap_screen"
-                                 arguments:@{@"x": @(nextPt.x), @"y": @(nextPt.y)}
-                                completion:^(id r, NSString *e) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                __strong typeof(weakSelf) self = weakSelf;
-                if (!self || self->_cancelled || !self->_running) return;
-                [[IOSDebMCPClient shared] callTool:@"describe_screen" arguments:@{} completion:^(id sRes, NSString *sErr) {
-                    __strong typeof(weakSelf) sSelf = weakSelf;
-                    if (!sSelf || sSelf->_cancelled || !sSelf->_running) return;
-                    NSDictionary *sDict = [sSelf dictionaryFromToolResult:sRes];
-                    if (sDict) [sSelf compactScreenFromResult:sDict];
-                    if (completion) completion();
-                }];
-            });
-        }];
-        return;
-    }
-
-    IOSDebLog(@"[agent] wrong answer explanation detected, but 「下一题」 not on screen, swiping up to reveal (count=%ld)...", (long)_wrongAnswerHandlingCount);
-    _currentStep += 1;
-    IOSDebAgentStep *swipeStep = [[IOSDebAgentStep alloc] init];
-    swipeStep.index = _currentStep;
-    swipeStep.toolName = @"swipe_screen";
-    swipeStep.title = @"滚动找按钮";
-    swipeStep.detail = @"上滑露出下一题";
-    swipeStep.ok = YES;
-    swipeStep.duration = 0.3;
-    [self emit:IOSDebAgentEventStep step:swipeStep message:nil];
-
-    __weak typeof(self) weakSelf = self;
-    [[IOSDebMCPClient shared] callTool:@"swipe_screen"
-                             arguments:@{@"fromX": @200, @"fromY": @700, @"toX": @200, @"toY": @350, @"duration": @300}
-                            completion:^(id swRes, NSString *swErr) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            __strong typeof(weakSelf) self = weakSelf;
-            if (!self || self->_cancelled || !self->_running) return;
-            [[IOSDebMCPClient shared] callTool:@"describe_screen" arguments:@{} completion:^(id sRes, NSString *sErr) {
-                __strong typeof(weakSelf) sSelf = weakSelf;
-                if (!sSelf || sSelf->_cancelled || !sSelf->_running) return;
-                NSDictionary *sDict = [sSelf dictionaryFromToolResult:sRes];
-                if (sDict) [sSelf compactScreenFromResult:sDict];
-                if (completion) completion();
-            }];
-        });
+        NSDictionary *r = [self dictionaryFromToolResult:receipt];
+        // Store only receipt fields, never arbitrary server response bodies.
+        NSMutableDictionary *safeReceipt = [NSMutableDictionary dictionary];
+        for (NSString *k in @[@"tapped", @"x", @"y", @"point", @"reason", @"isError", @"receiptFormat", @"receiptAcknowledged"])
+            if (r[k]) safeReceipt[k] = r[k];
+        safeReceipt[@"callbackType"] = [receipt isKindOfClass:NSDictionary.class] ? @"dictionary" :
+            [receipt isKindOfClass:NSString.class] ? @"string" : receipt ? @"other" : @"missing";
+        safeReceipt[@"acknowledged"] = @(step.ok);
+        [self quizEvent:@"tap_after" fields:@{@"source": source, @"target": target, @"point": coords,
+            @"receipt": safeReceipt, @"duration": @(step.duration), @"error": error ? [IOSDebStore redacted:error] : @""}];
+        if (receiptHandler) receiptHandler(step.ok, error);
+        if (error) { [self finish:IOSDebAgentEndFailed message:[NSString stringWithFormat:@"%@点击失败：%@；未重发", target, error]]; return; }
+        if (self->_cancelled) { [self finish:IOSDebAgentEndStopped message:@"已停止"]; return; }
+        [self pollQuiz:0 afterNext:isNext completion:completion];
     }];
 }
 
 - (void)executeFastBypassMatch:(IOSDebBypassMatch *)match {
-    if (_cancelled || !_running) return;
+    NSString *blocked = [_quizState beginOption:match.matchedOptionText];
+    if (blocked) { [self finish:IOSDebAgentEndFailed message:blocked]; return; }
+    _bypassHitCount++;
+    IOSDebLog(@"[agent] ⚡ Fast-Bypass [%ld/%ld]: %@ -> %@ (conf: %.2f)",
+              (long)_bypassHitCount, (long)_targetRounds, match.englishWord, match.matchedOptionText, match.confidence);
+    [self dispatchQuizTap:match.optionPoint target:match.matchedOptionText source:@"local" isNext:NO receiptHandler:nil completion:^{ [self stepLoop]; }];
+}
 
-    _currentStep += 1;
-    _bypassHitCount += 1;
+- (void)pollQuiz:(NSInteger)attempt afterNext:(BOOL)afterNext completion:(void (^)(void))completion {
+    NSUInteger generation = _runGeneration;
+    [self scheduleQuizPoll:^{
+        if (!self->_running || self->_runGeneration != generation) return;
+        [self readQuizScreen:0 completion:^(NSDictionary *screen, NSString *error) {
+            if (error) { [self finish:IOSDebAgentEndFailed message:error]; return; }
+            IOSDebQuizFingerprint *fp = [[IOSDebLexicon shared] quizFingerprintOnElements:self->_lastElements];
+            NSString *feedback = [IOSDebQuizState feedbackOnElements:self->_lastElements];
+            NSString *oldID = self->_quizState.questionID;
+            [self observeQuiz:fp feedback:feedback];
+            BOOL advanced = fp && ![oldID isEqual:self->_quizState.questionID];
+            [self quizEvent:@"poll" fields:@{@"attempt": @(attempt + 1), @"advanced": @(advanced),
+                @"feedback": feedback, @"selected": @(self->_quizState.answerEvidence)}];
+            if ([self finishIfQuizTarget]) return;
+            if (advanced) { if (completion) completion(); return; }
+            if (fp && !self->_quizState.optionSent && !self->_quizState.entryRecovery &&
+                self->_quizState.pageRelation != IOSDebQuizPageUnknown) {
+                if (completion) completion(); return;
+            }
+            BOOL wrong = [self->_quizState.feedback containsString:@"回答错误"] || [self->_quizState.feedback containsString:@"答错了"];
+            if (!afterNext && (wrong || self->_quizState.entryRecovery)) {
+                [self recoverQuizResultWithCompletion:completion]; return;
+            }
+            if (!fp && !feedback.length) {
+                IOSDebQuizPagePhase phase = [[IOSDebLexicon shared] quizPhaseOnElements:self->_lastElements];
+                if (self->_quizState.pageRelation == IOSDebQuizPageSame && (self->_quizState.answerEvidence || self->_quizState.entryRecovery)) {
+                    if (!afterNext && attempt + 1 >= 4) { [self recoverQuizResultWithCompletion:completion]; return; }
+                } else if (phase == IOSDebQuizPageOther) self->_quizMissCount++;
+                else self->_quizNoProgressCount++;
+                [self quizEvent:@"quiz_unrecognised" fields:@{@"missCount": @(self->_quizMissCount),
+                    @"phase": @(phase),
+                    @"screenSummary": [self quizScreenSummary]}];
+                if (self->_quizMissCount >= 8 || self->_quizNoProgressCount >= 8) {
+                    [self finish:IOSDebAgentEndFailed message:phase == IOSDebQuizPageOther ? @"连续 8 次未识别到答题页面，已停止" : @"页面连续 8 次恢复仍无进展，已停止"]; return;
+                }
+                if (afterNext && attempt + 1 >= 4) {
+                    [self finish:IOSDebAgentEndFailed message:@"下一题已发送，但新页面未能识别"]; return;
+                }
+                [self pollQuiz:attempt + 1 afterNext:afterNext completion:completion]; return;
+            }
+            if (fp) self->_quizMissCount = 0;
+            if (attempt + 1 < 4) { [self pollQuiz:attempt + 1 afterNext:afterNext completion:completion]; return; }
+            if (afterNext) {
+                [self finish:IOSDebAgentEndFailed message:self->_quizState.pageRelation == IOSDebQuizPageSame ? @"点击下一题后仍停留原题" : @"下一题已发送，但新页面未能识别"]; return;
+            }
+            [self recoverQuizResultWithCompletion:completion];
+        }];
+    }];
+}
 
-    IOSDebAgentStep *step = [[IOSDebAgentStep alloc] init];
-    step.index = _currentStep;
-    step.toolName = @"tap_screen";
-    step.title = @"词库直切";
-    step.detail = [NSString stringWithFormat:@"%@ -> %@ ⚡@(%.0f,%.0f)",
-                   match.englishWord, match.matchedOptionText, match.optionPoint.x, match.optionPoint.y];
-    step.ok = YES;
-    step.duration = 0.08;
-    [self emit:IOSDebAgentEventStep step:step message:nil];
+- (void)scheduleQuizPoll:(void (^)(void))block {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), block);
+}
 
-    IOSDebLog(@"[agent] ⚡ Fast-Bypass [%ld/%ld]: %@ -> %@ @(%.0f,%.0f) (conf: %.2f)",
-              (long)_bypassHitCount, (long)_targetRounds,
-              match.englishWord, match.matchedOptionText, match.optionPoint.x, match.optionPoint.y, match.confidence);
-
-    if (_targetRounds > 0 && (_completedRounds + 1) >= _targetRounds) {
-        IOSDebLog(@"[agent] ⚡ Fast-Bypass: target rounds reached (%ld/%ld), finishing after tap",
-                  (long)(_completedRounds + 1), (long)_targetRounds);
-        __weak typeof(self) weakSelf = self;
-        [[IOSDebMCPClient shared] callTool:@"tap_screen"
-                                 arguments:@{@"x": @(match.optionPoint.x), @"y": @(match.optionPoint.y)}
-                                completion:^(id r, NSString *e) {
-            __strong typeof(weakSelf) self = weakSelf;
-            if (!self) return;
-            self->_completedRounds += 1;
-            [self finish:IOSDebAgentEndCompleted
-                 message:[NSString stringWithFormat:@"已完成目标 %ld 轮「英语单词选择练习」，练习顺利结束。",
-                          (long)self->_targetRounds]];
+- (void)executeQuizCloudTool:(NSString *)name args:(NSDictionary *)args callID:(NSString *)callID calls:(NSArray *)calls index:(NSUInteger)index {
+    NSString *target = nil;
+    CGPoint point = CGPointZero;
+    IOSDebQuizFingerprint *fp = [[IOSDebLexicon shared] quizFingerprintOnElements:_lastElements];
+    if (fp) [self observeQuiz:fp feedback:[IOSDebQuizState feedbackOnElements:_lastElements]];
+    if ([self finishIfQuizTarget]) return;
+    if ([name isEqual:@"tap_element"] || [name isEqual:@"tap_screen"]) {
+        NSDictionary *hit = nil;
+        if ([name isEqual:@"tap_element"]) {
+            NSString *text = args[@"text"];
+            if ([text isKindOfClass:NSString.class] && text.length) {
+                NSMutableArray *matches = [NSMutableArray array];
+                for (NSDictionary *el in _lastElements) if ([el[@"text"] isEqual:text]) [matches addObject:el];
+                if (matches.count == 1) hit = matches.firstObject;
+            } else if (args[@"index"]) {
+                for (NSDictionary *el in _lastElements) if ([el[@"index"] isEqual:args[@"index"]]) { hit = el; break; }
+            }
+        } else if (args[@"x"] && args[@"y"]) {
+            point = CGPointMake([args[@"x"] doubleValue], [args[@"y"] doubleValue]);
+            double area = DBL_MAX;
+            for (NSDictionary *el in _lastElements) {
+                NSDictionary *r = el[@"rect"];
+                CGRect rect = CGRectMake([r[@"x"] doubleValue], [r[@"y"] doubleValue],
+                                         [r[@"width"] doubleValue], [r[@"height"] doubleValue]);
+                if (CGRectContainsPoint(rect, point) && rect.size.width * rect.size.height < area) {
+                    hit = el; area = rect.size.width * rect.size.height;
+                }
+            }
+        }
+        target = hit[@"text"];
+        if (hit && [name isEqual:@"tap_element"]) {
+            NSDictionary *r = hit[@"rect"];
+            point = CGPointMake([r[@"x"] doubleValue] + [r[@"width"] doubleValue]/2, [r[@"y"] doubleValue] + [r[@"height"] doubleValue]/2);
+        }
+    }
+    BOOL isNext = [IOSDebLexicon isNextButtonText:target];
+    if (isNext) {
+        [self requestQuizNextSource:@"cloud" waited:NO receiptHandler:^(BOOL ok, NSString *error) {
+            [self appendToolResult:callID name:name content:ok ? @"工具回执成功，等待屏幕验证" : (error ?: @"未执行下一题") ok:ok];
+            [self->_messages addObjectsFromArray:[IOSDebQuizState cancelledCalls:calls afterIndex:index]];
+        } completion:^{ [self stepLoop]; }];
+        return;
+    }
+    NSString *blocked = nil;
+    if (fp && _quizState.pageRelation != IOSDebQuizPageUnknown && [fp.signature isEqual:_quizState.fingerprint.signature] && [fp.optionTexts containsObject:target ?: @""]) blocked = [_quizState beginOption:target];
+    else blocked = @"答题阶段禁止猜测点击或滚动；目标不属于当前题";
+    if (blocked) {
+        [self appendToolResult:callID name:name content:blocked ok:NO];
+        [_messages addObjectsFromArray:[IOSDebQuizState cancelledCalls:calls afterIndex:index]];
+        [self quizEvent:@"cloud_action_blocked" fields:@{@"target": target ?: name, @"reason": blocked}];
+        if (_quizState.answerEvidence || _quizState.entryRecovery || _quizState.optionSent) {
+            [self pollQuiz:0 afterNext:_quizState.nextSent completion:^{ [self stepLoop]; }];
+            return;
+        }
+        _quizNoProgressCount++;
+        if (_quizNoProgressCount >= 8) {
+            [self finish:IOSDebAgentEndFailed message:@"模型连续 8 次纠正仍未产生有效动作，已停止"]; return;
+        }
+        [self readQuizScreen:0 completion:^(NSDictionary *screen, NSString *error) {
+            if (error) { [self finish:IOSDebAgentEndFailed message:error]; return; }
+            [self->_messages addObject:@{@"role": @"user", @"content": @"上一动作未执行。请根据最新题目选择一个答案；结果页由系统自动寻找下一题，不要重复操作。"}];
+            [self stepLoop];
         }];
         return;
     }
-
-    __weak typeof(self) weakSelf = self;
-    IOSDebQuizFingerprint *baseline = [[IOSDebLexicon shared] quizFingerprintOnElements:_lastElements];
-    [[IOSDebMCPClient shared] callTool:@"tap_screen"
-                             arguments:@{@"x": @(match.optionPoint.x), @"y": @(match.optionPoint.y)}
-                            completion:^(id res, NSString *err) {
-        __strong typeof(weakSelf) self = weakSelf;
-        if (!self || self->_cancelled || !self->_running) return;
-        [self awaitNewQuestionAfterMatch:match baseline:baseline attempt:0 didTapNext:NO];
+    [self dispatchQuizTap:point target:target source:@"cloud" isNext:isNext receiptHandler:^(BOOL ok, NSString *error) {
+        [self appendToolResult:callID name:name content:ok ? @"工具回执成功，等待屏幕验证" : (error ?: @"点击失败") ok:ok];
+        [self->_messages addObjectsFromArray:[IOSDebQuizState cancelledCalls:calls afterIndex:index]];
+    } completion:^{
+        [self stepLoop];
     }];
 }
 
-/// Polls the screen after a correct option was tapped. A new English word, or
-/// the same word with a different option set, means the app advanced by itself.
-/// Only a confirmed unchanged question earns a single「下一题」tap.
-- (void)awaitNewQuestionAfterMatch:(IOSDebBypassMatch *)match
-                          baseline:(IOSDebQuizFingerprint *)baseline
-                           attempt:(NSInteger)attempt
-                        didTapNext:(BOOL)didTapNext {
-    if (_cancelled || !_running) return;
-
-    const NSInteger kMaxPolls = 4;
-    const NSTimeInterval kPollInterval = 0.25;
-
-    NSString *baselineWord = baseline.englishWord.length ? baseline.englishWord : match.englishWord.lowercaseString;
-
-    __weak typeof(self) weakSelf = self;
-    [[IOSDebMCPClient shared] callTool:@"describe_screen" arguments:@{}
-                            completion:^(id scrRes, NSString *scrErr) {
-        __strong typeof(weakSelf) self = weakSelf;
-        if (!self || self->_cancelled || !self->_running) return;
-
-        NSDictionary *scrDict = [self dictionaryFromToolResult:scrRes];
-        if (scrErr || !scrDict) {
-            if (attempt < 1) {
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kPollInterval * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    [self awaitNewQuestionAfterMatch:match baseline:baseline attempt:attempt + 1 didTapNext:didTapNext];
-                });
-                return;
-            }
-            [self finish:IOSDebAgentEndFailed
-                 message:[NSString stringWithFormat:@"读取答题页失败：%@", scrErr ?: @"无返回"]];
-            return;
+- (void)syncQuizCloudSnapshot {
+    NSArray *markers = @[@"[系统已自动采集当前屏幕", @"[动作执行后自动刷新屏幕", @"[当前答题画面]"];
+    for (NSUInteger i = 0; i < _messages.count; i++) {
+        NSDictionary *message = _messages[i];
+        NSString *content = message[@"content"];
+        if (![content isKindOfClass:NSString.class] || [message[@"role"] isEqual:@"system"]) continue;
+        NSUInteger cut = content.length;
+        for (NSString *marker in markers) {
+            NSRange r = [content rangeOfString:marker];
+            if (r.location != NSNotFound) cut = MIN(cut, r.location);
         }
+        if (cut < content.length) {
+            NSMutableDictionary *copy = [message mutableCopy];
+            copy[@"content"] = [[content substringToIndex:cut] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            _messages[i] = copy;
+        }
+    }
+    NSString *compact = [self compactScreenFromResult:@{@"elements": _lastElements ?: @[], @"_quizFilteredCount": @(_overlayFilteredCount),
+        @"frontmost": @{@"name": _quizAppName ?: @"", @"bundleId": _quizFrontmost ?: @""}}];
+    [_messages addObject:@{@"role": @"user", @"content": [NSString stringWithFormat:
+        @"[当前答题画面]\n题目指纹：%@\n页面阶段：%ld\n%@\n只选择当前题目的一个答案。已作答结果页由系统处理，不要滚动或点击下一题。",
+        _lastQuizObservation.identityFingerprint.signature ?: @"", (long)_lastQuizObservation.phase, compact]}];
+}
 
-        [self compactScreenFromResult:scrDict];
+- (NSString *)quizViewportSignature {
+    NSMutableArray *items = [NSMutableArray array];
+    for (NSDictionary *el in _lastElements) {
+        NSString *text = el[@"text"];
+        NSDictionary *r = el[@"rect"];
+        if (![text isKindOfClass:NSString.class] || !r) continue;
+        [items addObject:[NSString stringWithFormat:@"%@:%ld:%ld", text,
+            (long)([r[@"x"] doubleValue]/4), (long)([r[@"y"] doubleValue]/4)]];
+    }
+    return [[items sortedArrayUsingSelector:@selector(compare:)] componentsJoinedByString:@"|"];
+}
 
-        if ([self isWrongAnswerScreenOnElements:self->_lastElements]) {
-            [self handleWrongAnswerScreenWithCompletion:^{
-                [self stepLoop];
+- (void)recoverQuizResultWithCompletion:(void (^)(void))completion {
+    if (!_running || _cancelled) return;
+    if (_quizState.pageRelation != IOSDebQuizPageSame || (!_quizState.answerEvidence && !_quizState.entryRecovery)) {
+        _quizNoProgressCount++;
+        [self quizEvent:@"quiz_recovery" fields:@{@"reason": @"等待作答反馈，不重复点击", @"noProgressCount": @(_quizNoProgressCount)}];
+        if (_quizNoProgressCount >= 8) {
+            [self finish:IOSDebAgentEndFailed message:@"作答后连续 8 次恢复仍无反馈或切题，已停止"]; return;
+        }
+        [self pollQuiz:0 afterNext:NO completion:completion]; return;
+    }
+    CGPoint point = CGPointZero;
+    if ([self findNextButtonInElements:_lastElements point:&point]) {
+        [self requestQuizNextSource:_quizState.entryRecovery ? @"entry" : @"guard" waited:YES receiptHandler:nil completion:completion];
+        return;
+    }
+    if (!_quizState.resultContinuation) {
+        _quizNoProgressCount++;
+        [self quizEvent:@"next_blocked" fields:@{@"reason": @"当前未确认原题结果页，不滚动猜测"}];
+        if (_quizNoProgressCount >= 8) { [self finish:IOSDebAgentEndFailed message:@"连续 8 次恢复未确认原题结果页，已停止"]; return; }
+        [self pollQuiz:0 afterNext:NO completion:completion]; return;
+    }
+    NSString *before = [self quizViewportSignature];
+    double width = _quizScreenWidth > 0 ? _quizScreenWidth : 390;
+    double height = _quizScreenHeight > 0 ? _quizScreenHeight : 844;
+    NSDictionary *args = @{@"fromX": @(width/2), @"fromY": @(height*0.72),
+                           @"toX": @(width/2), @"toY": @(height*0.32), @"duration": @350};
+    _currentStep++;
+    IOSDebAgentStep *step = [IOSDebAgentStep new];
+    step.index = _currentStep; step.toolName = @"swipe_screen"; step.title = @"向下寻找下一题";
+    step.detail = @"已作答解析页向下浏览";
+    [self emit:IOSDebAgentEventStep step:step message:nil];
+    [self quizEvent:@"quiz_recovery" fields:@{@"reason": @"下一题不可见，向下浏览解析页", @"noProgressCount": @(_quizNoProgressCount)}];
+    NSUInteger generation = _runGeneration;
+    NSDate *start = NSDate.date;
+    [[IOSDebMCPClient shared] callTool:@"swipe_screen" arguments:args completion:^(id result, NSString *error) {
+        if (!self->_running || self->_runGeneration != generation) return;
+        step.ok = error == nil; step.duration = -[start timeIntervalSinceNow];
+        [self emit:IOSDebAgentEventStep step:step message:nil];
+        if (error) { [self finish:IOSDebAgentEndFailed message:[NSString stringWithFormat:@"向下寻找下一题失败：%@", error]]; return; }
+        [self scheduleQuizPoll:^{
+            self->_controlledResultScroll = YES;
+            [self readQuizScreen:0 completion:^(NSDictionary *screen, NSString *readError) {
+                if (readError) { [self finish:IOSDebAgentEndFailed message:readError]; return; }
+                BOOL moved = ![before isEqual:[self quizViewportSignature]];
+                self->_quizNoProgressCount = moved ? 0 : self->_quizNoProgressCount + 1;
+                NSString *oldID = self->_quizState.questionID;
+                IOSDebQuizFingerprint *fp = [[IOSDebLexicon shared] quizFingerprintOnElements:self->_lastElements];
+                [self observeQuiz:fp feedback:[IOSDebQuizState feedbackOnElements:self->_lastElements]];
+                [self quizEvent:@"quiz_recovery" fields:@{@"reason": moved ? @"页面向下推进" : @"页面未移动，重新读取", @"noProgressCount": @(self->_quizNoProgressCount)}];
+                if ([self finishIfQuizTarget]) return;
+                if (fp && ![oldID isEqual:self->_quizState.questionID]) { if (completion) completion(); return; }
+                if (self->_quizNoProgressCount >= 8) {
+                    [self finish:IOSDebAgentEndFailed message:@"解析页连续 8 次恢复仍无进展，未找到下一题"]; return;
+                }
+                [self recoverQuizResultWithCompletion:completion];
             }];
-            return;
-        }
-
-        IOSDebQuizFingerprint *fp = [[IOSDebLexicon shared] quizFingerprintOnElements:self->_lastElements];
-        BOOL advanced = NO;
-        if (fp && fp.englishWord.length > 0) {
-            if (![fp.englishWord.lowercaseString isEqualToString:baselineWord.lowercaseString]) {
-                advanced = YES;
-            }
-        }
-
-        if (advanced) {
-            [self completeQuizRoundAndContinue];
-            return;
-        }
-
-        if (attempt + 1 < kMaxPolls) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kPollInterval * NSEC_PER_SEC)),
-                           dispatch_get_main_queue(), ^{
-                [self awaitNewQuestionAfterMatch:match baseline:baseline attempt:attempt + 1 didTapNext:didTapNext];
-            });
-            return;
-        }
-
-        if (didTapNext) {
-            IOSDebLog(@"[agent] question not advanced after tap/swipe, continuing to stepLoop");
-            [self stepLoop];
-            return;
-        }
-
-        BOOL hasNext = fp ? fp.hasNextButton : match.hasNextButton;
-        CGPoint nextPoint = fp ? fp.nextButtonPoint : match.nextButtonPoint;
-        if (!hasNext) {
-            IOSDebLog(@"[agent] no next button visible, swiping up to reveal/advance (word=%@)", match.englishWord);
-            self->_currentStep += 1;
-            [[IOSDebMCPClient shared] callTool:@"swipe_screen"
-                                     arguments:@{@"fromX": @200, @"fromY": @700, @"toX": @200, @"toY": @350, @"duration": @300}
-                                    completion:^(id swRes, NSString *swErr) {
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    [self awaitNewQuestionAfterMatch:match baseline:baseline attempt:0 didTapNext:YES];
-                });
-            }];
-            return;
-        }
-
-        self->_currentStep += 1;
-        IOSDebAgentStep *nextStep = [[IOSDebAgentStep alloc] init];
-        nextStep.index = self->_currentStep;
-        nextStep.toolName = @"tap_screen";
-        nextStep.title = @"下一题";
-        nextStep.detail = [NSString stringWithFormat:@"@(%.0f,%.0f)", nextPoint.x, nextPoint.y];
-        nextStep.ok = YES;
-        nextStep.duration = 0.08;
-        [self emit:IOSDebAgentEventStep step:nextStep message:nil];
-        IOSDebLog(@"[agent] confirmed unchanged question, tapping next once (word=%@)", match.englishWord);
-
-        [[IOSDebMCPClient shared] callTool:@"tap_screen"
-                                 arguments:@{@"x": @(nextPoint.x), @"y": @(nextPoint.y)}
-                                completion:^(id nRes, NSString *nErr) {
-            __strong typeof(weakSelf) sSelf = weakSelf;
-            if (!sSelf || sSelf->_cancelled || !sSelf->_running) return;
-            [sSelf awaitNewQuestionAfterMatch:match baseline:baseline attempt:0 didTapNext:YES];
         }];
     }];
 }
 
-- (void)completeQuizRoundAndContinue {
-    // Counting and the target check live in stepLoop, which sees the next
-    // fingerprint exactly once per question.
-    [self stepLoop];
+- (void)requestQuizNextSource:(NSString *)source waited:(BOOL)waited
+              receiptHandler:(void (^)(BOOL, NSString *))handler completion:(void (^)(void))completion {
+    NSString *oldID = _quizState.questionID;
+    [self readQuizScreen:0 completion:^(NSDictionary *screen, NSString *error) {
+        if (error) { if (handler) handler(NO, error); [self finish:IOSDebAgentEndFailed message:error]; return; }
+        [self observeQuiz:nil feedback:[IOSDebQuizState feedbackOnElements:self->_lastElements]];
+        if (self->_quizState.pageRelation == IOSDebQuizPageNew && ![oldID isEqual:self->_quizState.questionID]) {
+            if (handler) handler(NO, @"现场已进入新题，未执行下一题");
+            [self quizEvent:@"next_blocked" fields:@{@"source": source, @"reason": @"现场已进入新题"}];
+            if (![self finishIfQuizTarget] && completion) completion();
+            return;
+        }
+        if ([self finishIfQuizTarget]) { if (handler) handler(NO, @"目标轮数已完成，未执行下一题"); return; }
+        CGPoint point = CGPointZero;
+        BOOL button = [self findNextButtonInElements:self->_lastElements point:&point];
+        NSString *blocked = [self->_quizState reserveNextAfterWait:waited hasButton:button];
+        if (blocked) {
+            if (handler) handler(NO, blocked);
+            [self quizEvent:@"next_blocked" fields:@{@"source": source, @"reason": blocked}];
+            self->_quizNoProgressCount++;
+            if (self->_quizNoProgressCount >= 8) {
+                [self finish:IOSDebAgentEndFailed message:@"连续 8 次恢复无法确认下一题许可，已停止"]; return;
+            }
+            if (!self->_quizState.optionSent && !self->_quizState.entryRecovery &&
+                self->_lastQuizObservation.phase == IOSDebQuizPageAnswer && self->_quizState.pageRelation != IOSDebQuizPageUnknown) {
+                [self->_messages addObject:@{@"role": @"user", @"content": @"下一题请求未执行：当前题尚未作答。请只选择当前题目的一个答案。"}];
+                if (completion) completion(); return;
+            }
+            [self pollQuiz:0 afterNext:self->_quizState.nextSent completion:completion];
+            return;
+        }
+        [self quizEvent:@"next_reserved" fields:@{@"source": source, @"reason": self->_quizState.entryRecovery ? @"入口恢复，不计轮" : @"最新页面仍属于已作答原题"}];
+        [self dispatchQuizTap:point target:@"下一题" source:source isNext:YES receiptHandler:handler completion:completion];
+    }];
 }
 
 - (void)finish:(IOSDebAgentEndReason)reason message:(NSString *)message {
     if (!_running) return;
+    [self quizEvent:@"run_end" fields:@{@"reason": [IOSDebStore redacted:message] ?: @"", @"localCount": @(_bypassHitCount), @"cloudCount": @(_cloudCount)}];
     _running = NO;
+    if (_quizMode) [[IOSDebFloatingPanel shared] setQuizAccessibilityExcluded:NO];
     _cancelled = NO;
     _customStepLimit = 0;
     _consecutiveSameActionCount = 0;

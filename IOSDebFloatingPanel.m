@@ -1,6 +1,7 @@
 #import "IOSDebFloatingPanel.h"
 #import "IOSDebAgent.h"
 #import "IOSDebMCPClient.h"
+#import "IOSDebLLMClient.h"
 #import "IOSDebStore.h"
 #import "IOSDebSkill.h"
 #import "IOSDebRecorder.h"
@@ -8,11 +9,34 @@
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import <AVFoundation/AVFoundation.h>
 
 static CGFloat const kBarHeight = 40.0;
 static CGFloat const kPanelHeight = 360.0;
 static NSString *const kPosXKey = @"ui.barX";
 static NSString *const kPosYKey = @"ui.barY";
+
+static void IOSDebOwnDescriptor(NSMutableArray *items, NSString *text, UIView *view) {
+    if (!text.length || !view.window) return;
+    CGRect frame = view.accessibilityFrame;
+    if (CGRectIsEmpty(frame)) frame = UIAccessibilityConvertFrameToScreenCoordinates(view.bounds, view);
+    if (CGRectIsEmpty(frame)) return;
+    [items addObject:@{@"text": text, @"rect": @{@"x": @(frame.origin.x), @"y": @(frame.origin.y),
+        @"width": @(frame.size.width), @"height": @(frame.size.height)}}];
+}
+
+static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
+    if (view.hidden || view.alpha <= 0) return;
+    IOSDebOwnDescriptor(items, view.accessibilityLabel, view);
+    if ([view isKindOfClass:UILabel.class]) IOSDebOwnDescriptor(items, ((UILabel *)view).text, view);
+    if ([view isKindOfClass:UIButton.class]) IOSDebOwnDescriptor(items, ((UIButton *)view).currentTitle, view);
+    if ([view isKindOfClass:UITextView.class]) IOSDebOwnDescriptor(items, ((UITextView *)view).text, view);
+    if ([view isKindOfClass:UITextField.class]) {
+        UITextField *field = (UITextField *)view;
+        IOSDebOwnDescriptor(items, field.text.length ? field.text : field.placeholder, view);
+    }
+    for (UIView *child in view.subviews) IOSDebOwnDescriptors(child, items);
+}
 
 #pragma mark - Window
 
@@ -31,6 +55,7 @@ static NSString *const kPosYKey = @"ui.barY";
 
 @interface IOSDebStepCell : UITableViewCell
 - (void)configureWithStep:(IOSDebAgentStep *)step running:(BOOL)running;
+- (void)addQuizDescriptors:(NSMutableArray *)items;
 @end
 
 @implementation IOSDebStepCell {
@@ -104,6 +129,14 @@ static NSString *const kPosYKey = @"ui.barY";
     _dot.backgroundColor = step.duration > 0 ? (step.ok ? ok : bad) : run;
 }
 
+- (void)addQuizDescriptors:(NSMutableArray *)items {
+    for (NSString *text in @[[NSString stringWithFormat:@"%@, %@, %@", _title.text ?: @"", _badge.text ?: @"", _detail.text ?: @""],
+                            [NSString stringWithFormat:@"%@, %@, %@", _badge.text ?: @"", _title.text ?: @"", _detail.text ?: @""]]) {
+        IOSDebOwnDescriptor(items, text, self);
+        IOSDebOwnDescriptor(items, text, self.contentView);
+    }
+}
+
 @end
 
 #pragma mark - Panel
@@ -151,6 +184,14 @@ static NSString *const kPosYKey = @"ui.barY";
     BOOL _recording;
     NSTimer *_barRevertTimer;
 
+    // Voice input - uses AVAudioRecorder + cloud LLM transcription
+    BOOL _isVoiceInputting;
+    AVAudioRecorder *_voiceRecorder;
+    NSString *_voiceRecorderPath;
+    UIView *_voiceOverlay;
+    UILabel *_voiceLabel;
+    NSTimer *_voiceTimeoutTimer;
+
     NSMutableArray<IOSDebAgentStep *> *_steps;
     BOOL _expanded;
     CGPoint _dragStart;
@@ -158,6 +199,9 @@ static NSString *const kPosYKey = @"ui.barY";
     BOOL _dragging;
     NSDate *_taskStartTime;
     NSInteger _activeSkillTargetRounds;
+    BOOL _quizAccessibilityExcluded;
+    BOOL _savedWindowAXHidden;
+    BOOL _savedRootAXHidden;
 }
 
 + (instancetype)shared {
@@ -217,6 +261,11 @@ static NSString *const kPosYKey = @"ui.barY";
 
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(onBarPan:)];
     [_bar addGestureRecognizer:pan];
+
+    UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(onBarLongPress:)];
+    longPress.minimumPressDuration = 0.3;
+    longPress.allowableMovement = CGFLOAT_MAX; // allow finger to stay anywhere
+    [_bar addGestureRecognizer:longPress];
 
     // Panel (hidden until expanded).
     _panel = [[UIView alloc] initWithFrame:CGRectMake(12, h - kPanelHeight - 12,
@@ -639,6 +688,12 @@ static NSString *const kPosYKey = @"ui.barY";
     _window.backgroundColor = [UIColor clearColor];
     _window.windowLevel = UIWindowLevelAlert + 100;
     _window.hidden = YES;
+    _savedWindowAXHidden = _window.accessibilityElementsHidden;
+    _savedRootAXHidden = vc.view.accessibilityElementsHidden;
+    if (_quizAccessibilityExcluded) {
+        _window.accessibilityElementsHidden = YES;
+        vc.view.accessibilityElementsHidden = YES;
+    }
 
     [vc.view addSubview:_panel];
     [vc.view addSubview:_bar];
@@ -658,6 +713,11 @@ static NSString *const kPosYKey = @"ui.barY";
 - (void)attachToScene:(UIWindowScene *)scene {
     if (!scene) return;
     BOOL firstAttach = (_window == nil);
+    if (firstAttach) {
+        [[NSNotificationCenter defaultCenter] removeObserver:self name:UIKeyboardWillShowNotification object:nil];
+        [[NSNotificationCenter defaultCenter] removeObserver:self name:UIKeyboardWillHideNotification object:nil];
+        [self build];
+    }
     if (@available(iOS 13.0, *)) {
         _window.windowScene = scene;
     }
@@ -675,9 +735,41 @@ static NSString *const kPosYKey = @"ui.barY";
 }
 
 - (void)detach {
+    _window.accessibilityElementsHidden = _savedWindowAXHidden;
+    _window.rootViewController.view.accessibilityElementsHidden = _savedRootAXHidden;
     _window.hidden = YES;
     [_window resignKeyWindow];
     _window = nil;
+}
+
+- (void)setQuizAccessibilityExcluded:(BOOL)excluded {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self setQuizAccessibilityExcluded:excluded]; });
+        return;
+    }
+    if (_quizAccessibilityExcluded == excluded) return;
+    _quizAccessibilityExcluded = excluded;
+    if (excluded) {
+        _savedWindowAXHidden = _window.accessibilityElementsHidden;
+        _savedRootAXHidden = _window.rootViewController.view.accessibilityElementsHidden;
+    }
+    _window.accessibilityElementsHidden = excluded ? YES : _savedWindowAXHidden;
+    _window.rootViewController.view.accessibilityElementsHidden = excluded ? YES : _savedRootAXHidden;
+}
+
+- (NSArray<NSDictionary *> *)quizOverlayDescriptors {
+    if (!NSThread.isMainThread) {
+        __block NSArray *result;
+        dispatch_sync(dispatch_get_main_queue(), ^{ result = [self quizOverlayDescriptors]; });
+        return result;
+    }
+    NSMutableArray *items = [NSMutableArray array];
+    if (!_window || _window.hidden) return items;
+    IOSDebOwnDescriptors(_window.rootViewController.view, items);
+    if (!_table.hidden && !_panel.hidden) {
+        for (IOSDebStepCell *cell in _table.visibleCells) if (!cell.hidden) [cell addQuizDescriptors:items];
+    }
+    return items;
 }
 
 - (void)show { _window.hidden = NO; _bar.hidden = NO; }
@@ -688,10 +780,12 @@ static NSString *const kPosYKey = @"ui.barY";
 
 - (void)onBarTap {
     if (_dragging) return;
+    if (_isVoiceInputting) return;
     if (_expanded) [self collapse]; else [self expand];
 }
 
 - (void)onBarPan:(UIPanGestureRecognizer *)g {
+    if (_isVoiceInputting) return;
     CGPoint t = [g translationInView:_bar.superview];
     if (g.state == UIGestureRecognizerStateBegan) {
         _dragging = NO;
@@ -721,6 +815,232 @@ static NSString *const kPosYKey = @"ui.barY";
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ self->_dragging = NO; });
     }
+}
+
+#pragma mark - Voice Input
+
+- (void)onBarLongPress:(UILongPressGestureRecognizer *)g {
+    if (g.state == UIGestureRecognizerStateBegan) {
+        if ([IOSDebAgent shared].isRunning) return;
+        [self startVoiceInput];
+    } else if (g.state == UIGestureRecognizerStateEnded) {
+        [self stopVoiceInputWithCancel:NO];
+    } else if (g.state == UIGestureRecognizerStateCancelled || g.state == UIGestureRecognizerStateFailed) {
+        [self stopVoiceInputWithCancel:YES];
+    }
+}
+
+- (void)startVoiceInput {
+    _isVoiceInputting = YES;
+
+    // Set up recorder path
+    NSString *docs = NSTemporaryDirectory();
+    _voiceRecorderPath = [docs stringByAppendingPathComponent:@"voice_input.m4a"];
+
+    // Configure audio session for recording
+    NSError *sessionError = nil;
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    [session setCategory:AVAudioSessionCategoryPlayAndRecord mode:AVAudioSessionModeSpokenAudio
+                  options:AVAudioSessionCategoryOptionDuckOthers error:&sessionError];
+    if (sessionError) {
+        IOSDebLog(@"[voice] audio session error: %@", sessionError);
+        _isVoiceInputting = NO;
+        [self flashBarDenied];
+        return;
+    }
+    [session setActive:YES withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:&sessionError];
+
+    // Configure recorder settings (AAC, 44.1kHz, mono)
+    NSDictionary *settings = @{
+        AVFormatIDKey: @(kAudioFormatMPEG4AAC),
+        AVSampleRateKey: @44100.0,
+        AVNumberOfChannelsKey: @1,
+        AVEncoderAudioQualityKey: @(AVAudioQualityMedium)
+    };
+
+    _voiceRecorder = [[AVAudioRecorder alloc] initWithURL:[NSURL fileURLWithPath:_voiceRecorderPath]
+                                          settings:settings error:&sessionError];
+    if (!_voiceRecorder || sessionError) {
+        IOSDebLog(@"[voice] recorder init error: %@", sessionError);
+        _isVoiceInputting = NO;
+        [session setActive:NO withOptions:0 error:nil];
+        [self flashBarDenied];
+        return;
+    }
+
+    _voiceRecorder.delegate = nil;
+    [_voiceRecorder prepareToRecord];
+    [_voiceRecorder recordForDuration:30.0]; // Max 30 seconds
+
+    // Visual feedback
+    _bar.backgroundColor = [UIColor colorWithRed:0.898 green:0.2 blue:0.2 alpha:1.0];
+    _barLabel.text = @"🎤";
+
+    CABasicAnimation *pulse = [CABasicAnimation animationWithKeyPath:@"transform.scale"];
+    pulse.fromValue = @1.0;
+    pulse.toValue = @1.1;
+    pulse.duration = 0.6;
+    pulse.autoreverses = YES;
+    pulse.repeatCount = CGFLOAT_MAX;
+    [_bar.layer addAnimation:pulse forKey:@"voicePulse"];
+
+    [self createVoiceOverlay];
+    _voiceLabel.text = @"正在聆听…";
+
+    // Timeout timer
+    __weak typeof(self) ws = self;
+    _voiceTimeoutTimer = [NSTimer scheduledTimerWithTimeInterval:30.0 target:self
+        selector:@selector(onVoiceTimeout) userInfo:nil repeats:NO];
+    (void)ws;
+}
+
+- (void)onVoiceTimeout {
+    if (!_isVoiceInputting) return;
+    IOSDebLog(@"[voice] 30s timeout, stopping");
+    [self stopVoiceInputWithCancel:NO];
+}
+
+- (void)stopVoiceInputWithCancel:(BOOL)cancel {
+    if (!_isVoiceInputting) return;
+
+    [_voiceTimeoutTimer invalidate];
+    _voiceTimeoutTimer = nil;
+
+    // Stop recorder
+    BOOL hasRecording = NO;
+    if (_voiceRecorder && _voiceRecorder.isRecording) {
+        [_voiceRecorder stop];
+        hasRecording = YES;
+    }
+    if (_voiceRecorder) {
+        _voiceRecorder = nil;
+    }
+
+    // Deactivate audio session
+    [[AVAudioSession sharedInstance] setActive:NO
+                              withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
+
+    // Restore visual state
+    [_bar.layer removeAnimationForKey:@"voicePulse"];
+    _bar.backgroundColor = [self panelBackground];
+    _barLabel.text = @"AI";
+
+    if (cancel) {
+        [self removeVoiceOverlay];
+        _isVoiceInputting = NO;
+        // Clean up recording file
+        [[NSFileManager defaultManager] removeItemAtPath:_voiceRecorderPath error:nil];
+        return;
+    }
+
+    if (!hasRecording) {
+        [self removeVoiceOverlay];
+        _isVoiceInputting = NO;
+        [self flashBarDenied];
+        return;
+    }
+
+    // Show "识别中…" and transcribe
+    if (_voiceLabel) {
+        _voiceLabel.text = @"识别中…";
+        [self resizeVoiceOverlay];
+    }
+
+    NSData *audioData = [NSData dataWithContentsOfFile:_voiceRecorderPath];
+    [[NSFileManager defaultManager] removeItemAtPath:_voiceRecorderPath error:nil];
+
+    if (!audioData || audioData.length == 0) {
+        [self removeVoiceOverlay];
+        _isVoiceInputting = NO;
+        [self flashBarDenied];
+        return;
+    }
+
+    IOSDebLog(@"[voice] recording complete, %lu bytes, sending to LLM", (unsigned long)audioData.length);
+
+    __weak typeof(self) ws = self;
+    [[IOSDebLLMClient shared] transcribeAudio:audioData completion:^(NSString *text, NSString *error) {
+        __strong typeof(ws) s = ws;
+        if (!s) return;
+        [s removeVoiceOverlay];
+        s->_isVoiceInputting = NO;
+
+        if (error || !text.length) {
+            IOSDebLog(@"[voice] transcribe error: %@", error ?: @"empty");
+            [s flashBarDenied];
+            // Show error briefly
+            [s createVoiceOverlay];
+            s->_voiceLabel.text = error.length ? error : @"识别失败";
+            [s resizeVoiceOverlay];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                          dispatch_get_main_queue(), ^{
+                [s removeVoiceOverlay];
+            });
+            return;
+        }
+
+        IOSDebLog(@"[voice] transcribed: %@", text.length > 60 ? [text substringToIndex:60] : text);
+        s->_input.text = text;
+        s->_counter.text = [NSString stringWithFormat:@"%lu / 500", (unsigned long)text.length];
+        [s expand];
+        [s makeKeyForInput];
+    }];
+}
+
+- (void)createVoiceOverlay {
+    if (_voiceOverlay) [self removeVoiceOverlay];
+
+    CGFloat barX = _bar.frame.origin.x;
+    CGFloat barY = _bar.frame.origin.y;
+    CGFloat barH = _bar.bounds.size.height;
+
+    _voiceOverlay = [[UIView alloc] initWithFrame:CGRectMake(barX, barY + barH + 6, 200, 36)];
+    _voiceOverlay.backgroundColor = [UIColor colorWithRed:0.055 green:0.075 blue:0.098 alpha:0.92];
+    _voiceOverlay.layer.cornerRadius = 12;
+    _voiceOverlay.layer.borderWidth = 1;
+    _voiceOverlay.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
+    _voiceOverlay.clipsToBounds = YES;
+
+    _voiceLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 4, 184, 28)];
+    _voiceLabel.font = [UIFont systemFontOfSize:12];
+    _voiceLabel.textColor = [UIColor whiteColor];
+    _voiceLabel.numberOfLines = 2;
+    _voiceLabel.adjustsFontSizeToFitWidth = YES;
+    _voiceLabel.minimumScaleFactor = 0.7;
+    [_voiceOverlay addSubview:_voiceLabel];
+
+    [_bar.superview addSubview:_voiceOverlay];
+}
+
+- (void)resizeVoiceOverlay {
+    if (!_voiceOverlay || !_voiceLabel) return;
+    CGSize textSize = [_voiceLabel.text boundingRectWithSize:CGSizeMake(184, CGFLOAT_MAX)
+        options:NSStringDrawingUsesLineFragmentOrigin
+        attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:12]}
+        context:nil].size;
+    CGFloat w = MIN(200, MAX(120, textSize.width + 24));
+    CGFloat h = MAX(36, textSize.height + 12);
+    _voiceOverlay.frame = CGRectMake(_voiceOverlay.frame.origin.x, _voiceOverlay.frame.origin.y, w, h);
+    _voiceLabel.frame = CGRectMake(8, (h - textSize.height) / 2.0, w - 16, textSize.height);
+}
+
+- (void)removeVoiceOverlay {
+    [_voiceOverlay removeFromSuperview];
+    _voiceOverlay = nil;
+    _voiceLabel = nil;
+}
+
+- (void)flashBarDenied {
+    _bar.backgroundColor = [UIColor colorWithRed:0.898 green:0.2 blue:0.2 alpha:1.0];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        self->_bar.backgroundColor = [self panelBackground];
+    });
+}
+
+- (void)showVoicePermissionHint {
+    // No longer needed - we don't use SFSpeechRecognizer
+    [self flashBarDenied];
 }
 
 #pragma mark - Expand / collapse

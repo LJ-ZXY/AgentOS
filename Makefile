@@ -25,10 +25,11 @@ ios-deb_FILES = Tweak.x \
                 IOSDebSkill.m \
                 IOSDebRecorder.m \
                 IOSDebLexicon.m \
+                IOSDebQuizState.m \
                 IOSDebFloatingPanel.m
 
 ios-deb_CFLAGS = -fobjc-arc -Wno-unused-function -Wno-deprecated-declarations
-ios-deb_FRAMEWORKS = UIKit Foundation CoreGraphics QuartzCore AudioToolbox
+ios-deb_FRAMEWORKS = UIKit Foundation CoreGraphics QuartzCore AudioToolbox AVFoundation
 
 ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
     ios-deb_LIBRARIES = roothide

@@ -253,4 +253,149 @@ NSString *const IOSDebLLMErrorDomain = @"com.witchan.ios-deb.llm";
     }];
 }
 
+
+- (void)transcribeAudio:(NSData *)audioData
+             completion:(void (^)(NSString *_Nullable text, NSString *_Nullable error))completion {
+    IOSDebStore *s = [IOSDebStore shared];
+    if (![s isAIConfigured]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(nil, @"尚未配置模型");
+        });
+        return;
+    }
+
+    NSString *base = [s.apiBaseURL stringByTrimmingCharactersInSet:
+                        [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    while ([base hasSuffix:@"/"]) base = [base substringToIndex:base.length - 1];
+    if (base.length == 0) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(nil, @"API 地址为空");
+        });
+        return;
+    }
+
+    // Build Gemini generateContent URL
+    NSString *urlStr = [NSString stringWithFormat:@"%@/models/%@:generateContent",
+                        base, s.model ?: @""];
+    NSURL *url = [NSURL URLWithString:urlStr];
+    if (!url) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(nil, @"API 地址格式无效");
+        });
+        return;
+    }
+
+    // Base64 encode audio
+    NSString *b64 = [audioData base64EncodedStringWithOptions:0];
+
+    // Build Gemini-style request with inline audio data
+    NSDictionary *payload = @{
+        @"contents": @[@{
+            @"role": @"user",
+            @"parts": @[
+                @{@"text": @"请将这段中文语音转录为文字，只输出转录结果，不要加任何解释或标点符号以外的内容"},
+                @{@"inline_data": @{
+                    @"mime_type": @"audio/aac",
+                    @"data": b64
+                }}
+            ]
+        }],
+        @"generationConfig": @{@"temperature": @0.1}
+    };
+
+    NSData *bodyData = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+    if (!bodyData) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(nil, @"请求构造失败");
+        });
+        return;
+    }
+
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    req.HTTPMethod = @"POST";
+    req.timeoutInterval = 60.0;
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    // Gemini API uses x-goog-api-key header, but relay services may use Bearer
+    // Try both: set Bearer for relay compatibility
+    [req setValue:[NSString stringWithFormat:@"Bearer %@", s.apiKey ?: @""]
+        forHTTPHeaderField:@"Authorization"];
+    // Also set x-goog-api-key for native Gemini API
+    [req setValue:s.apiKey ?: @"" forHTTPHeaderField:@"x-goog-api-key"];
+    req.HTTPBody = bodyData;
+
+    IOSDebLog(@"[llm] transcribe: url=%@ model=%@ audioBytes=%lu b64Len=%lu",
+              urlStr, s.model, (unsigned long)audioData.length, (unsigned long)b64.length);
+
+    [[_session dataTaskWithRequest:req
+                completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+        if (err) {
+            NSString *msg = [NSString stringWithFormat:@"网络错误：%@",
+                             [IOSDebStore redacted:err.localizedDescription ?: @"未知"]];
+            IOSDebLog(@"[llm] transcribe network error: %@", msg);
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, msg); });
+            return;
+        }
+
+        NSHTTPURLResponse *http = (NSHTTPURLResponse *)resp;
+        NSString *raw = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+        IOSDebLog(@"[llm] transcribe HTTP %ld, responseLen=%lu",
+                  (long)http.statusCode, (unsigned long)data.length);
+
+        if (http.statusCode >= 400) {
+            NSString *trimmed = [IOSDebStore redacted:raw];
+            if (trimmed.length > 320) trimmed = [trimmed substringToIndex:320];
+            NSString *msg = [NSString stringWithFormat:@"HTTP %ld：%@", (long)http.statusCode, trimmed];
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, msg); });
+            return;
+        }
+
+        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        if (![json isKindOfClass:[NSDictionary class]]) {
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, @"返回格式无法解析"); });
+            return;
+        }
+
+        // Parse Gemini response: candidates[0].content.parts[0].text
+        NSArray *candidates = json[@"candidates"];
+        if (![candidates isKindOfClass:[NSArray class]] || candidates.count == 0) {
+            // Try OpenAI-compatible format as fallback
+            NSDictionary *choice = [json[@"choices"] firstObject];
+            NSDictionary *msg = choice[@"message"];
+            NSString *text = msg[@"content"];
+            if (text.length > 0) {
+                NSString *cleaned = [text stringByTrimmingCharactersInSet:
+                                    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                dispatch_async(dispatch_get_main_queue(), ^{ completion(cleaned, nil); });
+                return;
+            }
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, @"返回缺少候选结果"); });
+            return;
+        }
+
+        NSDictionary *firstCandidate = candidates[0];
+        NSDictionary *contentDict = firstCandidate[@"content"];
+        NSArray *parts = contentDict[@"parts"];
+        if (![parts isKindOfClass:[NSArray class]] || parts.count == 0) {
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, @"返回缺少文本"); });
+            return;
+        }
+
+        NSMutableString *result = [NSMutableString string];
+        for (NSDictionary *part in parts) {
+            NSString *t = part[@"text"];
+            if ([t isKindOfClass:[NSString class]]) [result appendString:t];
+        }
+
+        NSString *cleaned = [result stringByTrimmingCharactersInSet:
+                            [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (cleaned.length == 0) {
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, @"转录结果为空"); });
+            return;
+        }
+
+        IOSDebLog(@"[llm] transcribe success: %@", [cleaned length] > 60 ? [cleaned substringToIndex:60] : cleaned);
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(cleaned, nil); });
+    }] resume];
+}
+
 @end

@@ -30,6 +30,9 @@
   - **系统环境与感知控制（System OS Plane）**：支持直接读取设备全维状态（电量/存储/内存/系统版本/越狱环境）、读写剪贴板、调节屏幕亮度与媒体音量、管理应用生命周期与 URL 深链。
   - **屏幕感知与 UI 驱动（Perception & UI Plane）**：结合 iOS 无障碍树（AXTree）与端侧 PaddleOCR 实时语义定位操作界面。
   - **诊断与自愈分析（Diagnostics Plane）**：支持按需调取实时系统日志（Syslog）与崩溃堆栈（Crash Logs）进行故障诊断。
+- 🎙️ **全双工语音交互与智能转录（Voice Input & Audio Transcription）**：
+  - **长按胶囊直接说话**：主浮窗胶囊支持长按直接开启语音录入，伴随呼吸脉冲动效与触感反馈，松开手指自动转录为文字指令并自动触发 Agent 执行。
+  - **双模转录与免键盘交互**：集成端侧离线语音识别模型与多模态转录通道，在复杂移动端场景彻底解放双手，无需反复唤起软键盘。
 - 📖 **端侧离线双语词义秒级直切与空间翻译底座（Local Lexicon & Spatial Translation Base）**：
   - **离线词库与形态学还原**：内置 17,795 核心词条与 23,791 条词形还原（Lemmas）规则库，在 iPhone 端侧以  完成变形词还原与释义召回。
   - **通用词义极速直切**：在屏幕出现英文单词与中文选项场景下，端侧直接结合空间几何与词义交集打分秒切，单轮耗时压缩至 ，0 网络请求、0 Token 消耗，低置信度无感回退云端大模型。
@@ -109,14 +112,14 @@ chmod +x build_roothide.sh
 ./build_roothide.sh
 ```
 
-构建成功后，将在 `packages/` 目录下生成类似 `com.witchan.ios-deb_2.1.3_iphoneos-arm64e.deb` 安装包。
+构建成功后，将在 `packages/` 目录下生成类似 `com.witchan.ios-deb_2.1.4_iphoneos-arm64e.deb` 安装包。
 
 ### 设备安装与部署
 
 可直接推送到越狱设备并通过 `dpkg` 安装：
 
 ```bash
-dpkg -i com.witchan.ios-deb_2.1.3_iphoneos-arm64e.deb
+dpkg -i com.witchan.ios-deb_2.1.4_iphoneos-arm64e.deb
 killall -9 SpringBoard
 ```
 

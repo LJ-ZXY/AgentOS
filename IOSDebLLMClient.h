@@ -37,6 +37,12 @@ typedef NS_ENUM(NSInteger, IOSDebLLMErrorCode) {
 
 - (void)cancelAll;
 
+/// Transcribes audio data (AAC/m4a) to text using the Gemini generateContent API.
+/// Audio is sent as base64 inline data with a transcription prompt.
+/// Completion is delivered on the main queue.
+- (void)transcribeAudio:(NSData *)audioData
+             completion:(void (^)(NSString *_Nullable text, NSString *_Nullable error))completion;
+
 @end
 
 NS_ASSUME_NONNULL_END

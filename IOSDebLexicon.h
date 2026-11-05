@@ -24,19 +24,42 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) double confidence;           // 匹配置信度 (0.0 ~ 1.0)
 @end
 
+typedef NS_ENUM(NSInteger, IOSDebQuizPagePhase) {
+    IOSDebQuizPageOther,
+    IOSDebQuizPageAnswer,
+    IOSDebQuizPageResult,
+    IOSDebQuizPageTransition
+};
+
 /// One recognised multiple-choice question on screen. Used to tell whether
 /// answering a word actually advanced to a new question.
 @interface IOSDebQuizFingerprint : NSObject
+@property (nonatomic, copy) NSString *rawEnglishWord;
 @property (nonatomic, copy) NSString *englishWord;     // 目标英文词
 @property (nonatomic, copy) NSArray<NSString *> *optionTexts; // 中文选项集合（按屏幕顺序）
+@property (nonatomic, copy) NSArray<NSDictionary *> *optionElements;
 @property (nonatomic, copy) NSString *signature;       // 词 + 选项的稳定指纹
 @property (nonatomic, assign) BOOL hasNextButton;      // 是否存在「下一题」
 @property (nonatomic, assign) CGPoint nextButtonPoint; // 「下一题」中心坐标
 @end
 
+@interface IOSDebQuizObservation : NSObject
+@property (nonatomic, assign) IOSDebQuizPagePhase phase;
+@property (nonatomic, strong, nullable) IOSDebQuizFingerprint *fingerprint;
+@property (nonatomic, strong, nullable) IOSDebQuizFingerprint *identityFingerprint;
+@property (nonatomic, copy) NSString *observedWord;
+@property (nonatomic, copy) NSArray<NSString *> *englishCandidates;
+@property (nonatomic, copy) NSArray<NSString *> *answerCandidates;
+@property (nonatomic, copy) NSArray<NSString *> *pronunciationCandidates;  // confirmed phonetic texts excluded from targets
+@property (nonatomic, copy) NSString *recognitionReason;
+@end
+
 @interface IOSDebLexicon : NSObject
 
 + (instancetype)shared;
++ (BOOL)isNextButtonText:(NSString *)text;
++ (NSArray<NSDictionary *> *)filterElements:(NSArray<NSDictionary *> *)elements
+                       overlayDescriptors:(NSArray<NSDictionary *> *)descriptors;
 
 - (BOOL)isLoaded;
 - (void)preloadIfNeeded;
@@ -53,8 +76,14 @@ NS_ASSUME_NONNULL_BEGIN
 /// 通用词义匹配评估（看英文选中文）：不限选项数量，自动对齐目标英文与中文选项
 - (nullable IOSDebBypassMatch *)evaluateWordMeaningMatchOnElements:(NSArray<NSDictionary *> *)elements;
 
+/// 判断文本是否为音标包裹（/.../ 或 [...]），返回内部内容；非音标返回 nil。
++ (nullable NSString *)extractPronunciationText:(NSString *)text;
+
 /// 识别当前答题页的英文目标词与中文选项指纹（不要求词库命中）。
 - (nullable IOSDebQuizFingerprint *)quizFingerprintOnElements:(NSArray<NSDictionary *> *)elements;
+- (IOSDebQuizPagePhase)quizPhaseOnElements:(NSArray<NSDictionary *> *)elements;
+- (IOSDebQuizObservation *)quizObservationOnElements:(NSArray<NSDictionary *> *)elements;
+- (NSDictionary *)decisionOnFingerprint:(nullable IOSDebQuizFingerprint *)fingerprint;
 
 @end
 

@@ -146,8 +146,12 @@ static NSString *IOSDebPref(NSString *key) {
     self.stepLimit = n;
     // Log the raw value: a mismatch between the on-disk plist and this line
     // means SpringBoard is reading a different copy than the shell wrote.
-    IOSDebLog(@"[store] stepLimit raw=%@ (%@) -> %ld | %@",
-              limit ?: @"nil", [limit class], (long)n, self.diskDiagnostics);
+    static NSString *lastLimitConfig;
+    NSString *config = [NSString stringWithFormat:@"%@/%@/%ld", limit ?: @"nil", [limit class], (long)n];
+    if (![config isEqualToString:lastLimitConfig]) {
+        lastLimitConfig = config;
+        IOSDebLog(@"[store] stepLimit raw=%@ (%@) -> %ld", limit ?: @"nil", [limit class], (long)n);
+    }
 
     NSNumber *confirm = [self readKey:IOSDebPref(@"confirmBeforeRun")];
     self.confirmBeforeRun = confirm ? confirm.boolValue : YES;

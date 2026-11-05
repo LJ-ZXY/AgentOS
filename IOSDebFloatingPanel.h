@@ -13,6 +13,8 @@ NS_ASSUME_NONNULL_BEGIN
 @interface IOSDebFloatingPanel : NSObject
 
 + (instancetype)shared;
+- (void)setQuizAccessibilityExcluded:(BOOL)excluded;
+- (NSArray<NSDictionary *> *)quizOverlayDescriptors;
 
 /// Attaches the overlay to the given scene (called from SpringBoard hooks).
 - (void)attachToScene:(UIWindowScene *)scene;

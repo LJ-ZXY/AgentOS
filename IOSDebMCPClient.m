@@ -1,6 +1,7 @@
 #import "IOSDebMCPClient.h"
 #import "IOSDebStore.h"
 #import "IOSDebLog.h"
+#import "IOSDebQuizState.h"
 
 static const NSTimeInterval kIOSDebRequestTimeout = 15.0;
 
@@ -205,8 +206,35 @@ static const NSTimeInterval kIOSDebRequestTimeout = 15.0;
     NSDictionary *params = @{@"name": name, @"arguments": arguments ?: @{}};
     [self performMethod:@"tools/call" params:params completion:^(id result, NSString *error) {
         if (error) { completion(nil, error); return; }
-        completion([self extractText:result], nil);
-    } retry:YES];
+        NSString *receiptError = [IOSDebQuizState receiptError:result];
+        if (receiptError) { completion(result, receiptError); return; }
+        id structured = [result isKindOfClass:NSDictionary.class] ? result[@"structuredContent"] : nil;
+        if ([name isEqual:@"tap_screen"] || [name isEqual:@"tap_element"]) {
+            // Keep the validated envelope: tap_screen succeeds with plain text,
+            // whereas tap_element may return JSON. Neither is page-change proof.
+            NSMutableDictionary *receipt = [result mutableCopy];
+            NSDictionary *payload = [structured isKindOfClass:NSDictionary.class] ? structured : nil;
+            NSString *format = payload ? @"structured" : @"envelope";
+            if (!payload) {
+                for (id item in result[@"content"]) {
+                    if (![item isKindOfClass:NSDictionary.class] || ![item[@"type"] isEqual:@"text"] ||
+                        ![item[@"text"] isKindOfClass:NSString.class]) continue;
+                    NSData *data = [item[@"text"] dataUsingEncoding:NSUTF8StringEncoding];
+                    id parsed = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+                    payload = [parsed isKindOfClass:NSDictionary.class] ? parsed : nil;
+                    format = payload ? @"text_json" : @"text";
+                    break;
+                }
+            }
+            for (NSString *key in @[@"tapped", @"x", @"y", @"point", @"reason"])
+                if (!receipt[key] && payload[key]) receipt[key] = payload[key];
+            receipt[@"receiptFormat"] = format;
+            receipt[@"receiptAcknowledged"] = @YES;
+            completion(receipt, nil);
+            return;
+        }
+        completion([structured isKindOfClass:NSDictionary.class] ? structured : [self extractText:result], nil);
+    } retry:([@[@"describe_screen", @"get_ui_elements", @"get_screen_info", @"get_frontmost_app"] containsObject:name])];
 }
 
 - (void)performMethod:(NSString *)method
