@@ -28,6 +28,10 @@ It completely frees mobile automation from computer tethering (USB/WiFi ADB) and
   - Tracks versions, run counts, and success rates displayed directly on chips.
 - 🛡️ **Single-Task Safety Boundary**:
   - Discrete one-shot execution model. Clicking a skill runs strictly that task and halts completely upon completion—never auto-chains unexpected tasks.
+- 📖 **Local Bilingual Lexicon & Spatial Translation Base**:
+  - **Offline Lexicon & Morphology**: Embedded with 17,970 core vocabulary entries and 23,794 lemmatization rules, completing inflection reduction and definition retrieval in <1ms on-device.
+  - **Instant Fast-Bypass Matching**: Directly scores spatial geometry and meaning intersections between screen English words and Chinese options in <0.2s, with 0 network calls and 0 token consumption.
+  - **Spatial Translation Foundation**: Implements `IOSDebTranslatedSpan` abstraction with physical coordinates and on-device translation tools.
 
 ---
 
