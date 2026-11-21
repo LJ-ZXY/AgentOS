@@ -14,7 +14,7 @@
 
 static CGFloat const kBarHeight = 36.0;
 static CGFloat const kBarWidth = 68.0;
-static CGFloat const kPanelHeight = 356.0;
+static CGFloat const kPanelHeight = 260.0;
 static NSString *const kPosXKey = @"ui.barX";
 static NSString *const kPosYKey = @"ui.barY";
 
@@ -81,7 +81,7 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         [self.contentView addSubview:_timelineLine];
 
         _dotRing = [[UIView alloc] init];
-        _dotRing.layer.cornerRadius = 6;
+        _dotRing.layer.cornerRadius = 5;
         _dotRing.layer.borderWidth = 1.0;
         _dotRing.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.18].CGColor;
         _dotRing.backgroundColor = [UIColor clearColor];
@@ -89,39 +89,39 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         [self.contentView addSubview:_dotRing];
 
         _dot = [[UIView alloc] init];
-        _dot.layer.cornerRadius = 3;
+        _dot.layer.cornerRadius = 2.5;
         _dot.layer.masksToBounds = YES;
         _dot.translatesAutoresizingMaskIntoConstraints = NO;
         [_dotRing addSubview:_dot];
 
         _badge = [[UILabel alloc] init];
-        _badge.font = [UIFont monospacedDigitSystemFontOfSize:9 weight:UIFontWeightBold];
+        _badge.font = [UIFont monospacedDigitSystemFontOfSize:8.5 weight:UIFontWeightBold];
         _badge.textColor = [UIColor colorWithWhite:1 alpha:0.65];
         _badge.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
-        _badge.layer.cornerRadius = 3;
+        _badge.layer.cornerRadius = 2.5;
         _badge.layer.masksToBounds = YES;
         _badge.textAlignment = NSTextAlignmentCenter;
         _badge.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:_badge];
 
         _toolTag = [[UILabel alloc] init];
-        _toolTag.font = [UIFont monospacedSystemFontOfSize:9 weight:UIFontWeightBold];
+        _toolTag.font = [UIFont monospacedSystemFontOfSize:8.5 weight:UIFontWeightBold];
         _toolTag.textColor = [UIColor colorWithRed:0.4 green:0.8 blue:1.0 alpha:1.0];
         _toolTag.backgroundColor = [UIColor colorWithRed:0.2 green:0.6 blue:1.0 alpha:0.15];
-        _toolTag.layer.cornerRadius = 3;
+        _toolTag.layer.cornerRadius = 2.5;
         _toolTag.layer.masksToBounds = YES;
         _toolTag.textAlignment = NSTextAlignmentCenter;
         _toolTag.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:_toolTag];
 
         _title = [[UILabel alloc] init];
-        _title.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+        _title.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightMedium];
         _title.textColor = [UIColor whiteColor];
         _title.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:_title];
 
         _detail = [[UILabel alloc] init];
-        _detail.font = [UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightRegular];
+        _detail.font = [UIFont monospacedSystemFontOfSize:9.5 weight:UIFontWeightRegular];
         _detail.textColor = [UIColor colorWithWhite:1 alpha:0.45];
         _detail.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:_detail];
@@ -134,31 +134,31 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 
             [_dotRing.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:12],
             [_dotRing.centerYAnchor constraintEqualToAnchor:_title.centerYAnchor],
-            [_dotRing.widthAnchor constraintEqualToConstant:12],
-            [_dotRing.heightAnchor constraintEqualToConstant:12],
+            [_dotRing.widthAnchor constraintEqualToConstant:10],
+            [_dotRing.heightAnchor constraintEqualToConstant:10],
 
             [_dot.centerXAnchor constraintEqualToAnchor:_dotRing.centerXAnchor],
             [_dot.centerYAnchor constraintEqualToAnchor:_dotRing.centerYAnchor],
-            [_dot.widthAnchor constraintEqualToConstant:6],
-            [_dot.heightAnchor constraintEqualToConstant:6],
+            [_dot.widthAnchor constraintEqualToConstant:5],
+            [_dot.heightAnchor constraintEqualToConstant:5],
 
-            [_badge.leadingAnchor constraintEqualToAnchor:_dotRing.trailingAnchor constant:7],
+            [_badge.leadingAnchor constraintEqualToAnchor:_dotRing.trailingAnchor constant:6],
             [_badge.centerYAnchor constraintEqualToAnchor:_title.centerYAnchor],
-            [_badge.widthAnchor constraintGreaterThanOrEqualToConstant:14],
-            [_badge.heightAnchor constraintEqualToConstant:14],
+            [_badge.widthAnchor constraintGreaterThanOrEqualToConstant:13],
+            [_badge.heightAnchor constraintEqualToConstant:13],
 
-            [_toolTag.leadingAnchor constraintEqualToAnchor:_badge.trailingAnchor constant:5],
+            [_toolTag.leadingAnchor constraintEqualToAnchor:_badge.trailingAnchor constant:4],
             [_toolTag.centerYAnchor constraintEqualToAnchor:_title.centerYAnchor],
-            [_toolTag.heightAnchor constraintEqualToConstant:14],
+            [_toolTag.heightAnchor constraintEqualToConstant:13],
 
-            [_title.leadingAnchor constraintEqualToAnchor:_toolTag.trailingAnchor constant:6],
+            [_title.leadingAnchor constraintEqualToAnchor:_toolTag.trailingAnchor constant:5],
             [_title.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-10],
-            [_title.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:6],
+            [_title.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:3],
 
             [_detail.leadingAnchor constraintEqualToAnchor:_title.leadingAnchor],
             [_detail.trailingAnchor constraintEqualToAnchor:_title.trailingAnchor],
-            [_detail.topAnchor constraintEqualToAnchor:_title.bottomAnchor constant:2],
-            [_detail.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-6],
+            [_detail.topAnchor constraintEqualToAnchor:_title.bottomAnchor constant:1],
+            [_detail.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-3],
         ]];
     }
     return self;
@@ -384,13 +384,13 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         [_panel insertSubview:blurView atIndex:0];
     }
 
-    _brandLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 11, 74, 22)];
+    _brandLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 8, 74, 20)];
     _brandLabel.text = @"AgentOS";
-    _brandLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
+    _brandLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
     _brandLabel.textColor = [UIColor whiteColor];
     [_panel addSubview:_brandLabel];
 
-    _versionBadge = [[UILabel alloc] initWithFrame:CGRectMake(92, 13, 82, 18)];
+    _versionBadge = [[UILabel alloc] initWithFrame:CGRectMake(92, 9, 82, 18)];
     _versionBadge.text = [NSString stringWithFormat:@"v%@", AGENTOS_VERSION];
     _versionBadge.font = [UIFont monospacedDigitSystemFontOfSize:9 weight:UIFontWeightSemibold];
     _versionBadge.textColor = [UIColor colorWithWhite:1 alpha:0.65];
@@ -403,38 +403,39 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     [_panel addSubview:_versionBadge];
 
     _updateBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    _updateBtn.frame = CGRectMake(panelW - 14 - 28 - 8 - 56, 10, 56, 24);
+    _updateBtn.frame = CGRectMake(panelW - 14 - 26 - 6 - 54, 7, 54, 22);
     [_updateBtn setTitle:@"⟳ 更新" forState:UIControlStateNormal];
-    _updateBtn.titleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+    _updateBtn.titleLabel.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightMedium];
     [_updateBtn setTitleColor:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1] forState:UIControlStateNormal];
     _updateBtn.backgroundColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.12];
-    _updateBtn.layer.cornerRadius = 12;
+    _updateBtn.layer.cornerRadius = 11;
     _updateBtn.layer.borderWidth = 0.5;
     _updateBtn.layer.borderColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.35].CGColor;
     [_updateBtn addTarget:self action:@selector(onCheckUpdate) forControlEvents:UIControlEventTouchUpInside];
     [_panel addSubview:_updateBtn];
 
     _collapseBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    _collapseBtn.frame = CGRectMake(panelW - 14 - 28, 8, 28, 28);
+    _collapseBtn.frame = CGRectMake(panelW - 14 - 26, 6, 26, 26);
     [_collapseBtn setTitle:@"▾" forState:UIControlStateNormal];
-    _collapseBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
+    _collapseBtn.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightBold];
     [_collapseBtn setTitleColor:[UIColor colorWithWhite:1 alpha:0.75] forState:UIControlStateNormal];
     _collapseBtn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
-    _collapseBtn.layer.cornerRadius = 14;
+    _collapseBtn.layer.cornerRadius = 13;
     _collapseBtn.layer.borderWidth = 0.5;
     _collapseBtn.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
     [_collapseBtn addTarget:self action:@selector(collapse) forControlEvents:UIControlEventTouchUpInside];
     [_panel addSubview:_collapseBtn];
 
-    _input = [[UITextView alloc] initWithFrame:CGRectMake(12, 40, panelW - 24, 54)];
+    // Command input & Send inline
+    _input = [[UITextView alloc] initWithFrame:CGRectMake(12, 34, panelW - 24 - 58, 36)];
     _input.backgroundColor = [UIColor colorWithWhite:1 alpha:0.07];
-    _input.layer.cornerRadius = 12;
+    _input.layer.cornerRadius = 10;
     if (@available(iOS 13.0, *)) {
         _input.layer.cornerCurve = kCACornerCurveContinuous;
     }
     _input.layer.borderWidth = 0.5;
     _input.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
-    _input.textContainerInset = UIEdgeInsetsMake(7, 8, 7, 8);
+    _input.textContainerInset = UIEdgeInsetsMake(6, 6, 6, 6);
     _input.font = [UIFont systemFontOfSize:13];
     _input.textColor = [UIColor whiteColor];
     _input.delegate = self;
@@ -442,20 +443,14 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     [_input setKeyboardAppearance:UIKeyboardAppearanceDark];
     [_panel addSubview:_input];
 
-    _counter = [[UILabel alloc] initWithFrame:CGRectMake(16, 100, 120, 16)];
-    _counter.text = @"0 / 500";
-    _counter.font = [UIFont systemFontOfSize:10];
-    _counter.textColor = [UIColor colorWithWhite:1 alpha:0.42];
-    [_panel addSubview:_counter];
-
     _sendButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    _sendButton.frame = CGRectMake(panelW - 12 - 76, 97, 76, 28);
+    _sendButton.frame = CGRectMake(panelW - 12 - 50, 34, 50, 36);
     [_sendButton setTitle:@"发送" forState:UIControlStateNormal];
     _sendButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
     _sendButton.backgroundColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1];
     [_sendButton setTitleColor:[UIColor colorWithRed:0.016 green:0.078 blue:0.059 alpha:1]
                       forState:UIControlStateNormal];
-    _sendButton.layer.cornerRadius = 9;
+    _sendButton.layer.cornerRadius = 10;
     [_sendButton addTarget:self action:@selector(onSend) forControlEvents:UIControlEventTouchUpInside];
     [_panel addSubview:_sendButton];
 
@@ -465,21 +460,17 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     _stopButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
     _stopButton.backgroundColor = [UIColor colorWithRed:0.898 green:0.329 blue:0.294 alpha:1];
     [_stopButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    _stopButton.layer.cornerRadius = 9;
+    _stopButton.layer.cornerRadius = 10;
     _stopButton.hidden = YES;
     [_stopButton addTarget:self action:@selector(onStop) forControlEvents:UIControlEventTouchUpInside];
     [_panel addSubview:_stopButton];
 
-    _divider = [[UIView alloc] initWithFrame:CGRectMake(12, 130, panelW - 24, 0.5)];
-    _divider.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
-    [_panel addSubview:_divider];
-
-    // Quick Action Clusters (3 pills: ⚡ 技能中心, ● 空间录制, 🎙 语音输入)
-    CGFloat chipY = 138;
+    // Quick Action Clusters (3 pills: ⚡ 技能中心, ● 技能录制, 🎙 语音输入)
+    CGFloat chipY = 76;
     CGFloat actionMargin = 12.0;
-    CGFloat actionGap = 8.0;
+    CGFloat actionGap = 7.0;
     CGFloat actionW = floor((panelW - 2 * actionMargin - 2 * actionGap) / 3.0);
-    CGFloat actionH = 30.0;
+    CGFloat actionH = 27.0;
 
     _skillLibButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _skillLibButton.frame = CGRectMake(actionMargin, chipY, actionW, actionH);
@@ -487,7 +478,7 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     _skillLibButton.titleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
     [_skillLibButton setTitleColor:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1] forState:UIControlStateNormal];
     _skillLibButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
-    _skillLibButton.layer.cornerRadius = 15;
+    _skillLibButton.layer.cornerRadius = 13.5;
     _skillLibButton.layer.borderWidth = 0.5;
     _skillLibButton.layer.borderColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.35].CGColor;
     [_skillLibButton addTarget:self action:@selector(openSkillLibrary) forControlEvents:UIControlEventTouchUpInside];
@@ -495,11 +486,11 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 
     _recordButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _recordButton.frame = CGRectMake(actionMargin + actionW + actionGap, chipY, actionW, actionH);
-    [_recordButton setTitle:@"● 空间录制" forState:UIControlStateNormal];
+    [_recordButton setTitle:@"● 技能录制" forState:UIControlStateNormal];
     _recordButton.titleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
     [_recordButton setTitleColor:[UIColor colorWithRed:0.95 green:0.35 blue:0.35 alpha:1] forState:UIControlStateNormal];
     _recordButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
-    _recordButton.layer.cornerRadius = 15;
+    _recordButton.layer.cornerRadius = 13.5;
     _recordButton.layer.borderWidth = 0.5;
     _recordButton.layer.borderColor = [UIColor colorWithRed:0.95 green:0.35 blue:0.35 alpha:0.35].CGColor;
     [_recordButton addTarget:self action:@selector(onRecord) forControlEvents:UIControlEventTouchUpInside];
@@ -511,7 +502,7 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     _voiceButton.titleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
     [_voiceButton setTitleColor:[UIColor colorWithRed:0.25 green:0.65 blue:1.0 alpha:1] forState:UIControlStateNormal];
     _voiceButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
-    _voiceButton.layer.cornerRadius = 15;
+    _voiceButton.layer.cornerRadius = 13.5;
     _voiceButton.layer.borderWidth = 0.5;
     _voiceButton.layer.borderColor = [UIColor colorWithRed:0.25 green:0.65 blue:1.0 alpha:0.35].CGColor;
     [_voiceButton addTarget:self action:@selector(onVoiceButtonClick) forControlEvents:UIControlEventTouchUpInside];
@@ -525,43 +516,43 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     _skillContainer.hidden = YES;
 
     UIButton *backBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    backBtn.frame = CGRectMake(10, 10, 68, 30);
+    backBtn.frame = CGRectMake(10, 6, 68, 28);
     [backBtn setTitle:@"‹ 返回" forState:UIControlStateNormal];
-    backBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    backBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
     [backBtn setTitleColor:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1] forState:UIControlStateNormal];
     [backBtn addTarget:self action:@selector(closeSkillLibrary) forControlEvents:UIControlEventTouchUpInside];
     [_skillContainer addSubview:backBtn];
 
-    UILabel *libTitle = [[UILabel alloc] initWithFrame:CGRectMake(80, 10, w - 24 - 160, 30)];
+    UILabel *libTitle = [[UILabel alloc] initWithFrame:CGRectMake(80, 6, w - 24 - 160, 28)];
     libTitle.text = @"已存技能中心";
     libTitle.textAlignment = NSTextAlignmentCenter;
-    libTitle.font = [UIFont boldSystemFontOfSize:15];
+    libTitle.font = [UIFont boldSystemFontOfSize:14];
     libTitle.textColor = [UIColor whiteColor];
     [_skillContainer addSubview:libTitle];
 
     UIButton *quickImport = [UIButton buttonWithType:UIButtonTypeSystem];
-    quickImport.frame = CGRectMake(w - 24 - 74, 10, 64, 30);
+    quickImport.frame = CGRectMake(w - 24 - 70, 6, 60, 28);
     [quickImport setTitle:@"+ 导入" forState:UIControlStateNormal];
     quickImport.titleLabel.font = [UIFont boldSystemFontOfSize:12];
     [quickImport setTitleColor:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1] forState:UIControlStateNormal];
     [quickImport addTarget:self action:@selector(onImport) forControlEvents:UIControlEventTouchUpInside];
     [_skillContainer addSubview:quickImport];
 
-    UIView *libDivider = [[UIView alloc] initWithFrame:CGRectMake(0, 48, w - 24, 1)];
+    UIView *libDivider = [[UIView alloc] initWithFrame:CGRectMake(0, 38, w - 24, 1)];
     libDivider.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
     [_skillContainer addSubview:libDivider];
 
-    _skillTable = [[UITableView alloc] initWithFrame:CGRectMake(0, 49, w - 24, _panel.bounds.size.height - 49)
+    _skillTable = [[UITableView alloc] initWithFrame:CGRectMake(0, 39, w - 24, _panel.bounds.size.height - 39)
                                                style:UITableViewStylePlain];
     _skillTable.backgroundColor = [UIColor clearColor];
     _skillTable.separatorColor = [UIColor colorWithWhite:1 alpha:0.06];
-    _skillTable.rowHeight = 58;
+    _skillTable.rowHeight = 50;
     _skillTable.dataSource = self;
     _skillTable.delegate = self;
     _skillTable.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
     [_skillContainer addSubview:_skillTable];
 
-    _skillEmptyLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 120, w - 24 - 40, 60)];
+    _skillEmptyLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 80, w - 24 - 40, 50)];
     _skillEmptyLabel.numberOfLines = 2;
     _skillEmptyLabel.textAlignment = NSTextAlignmentCenter;
     _skillEmptyLabel.text = @"暂无已存技能\n点击上方「+ 导入」或返回主页「● 录制」";
@@ -578,126 +569,126 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     _skillDetailContainer.hidden = YES;
 
     UIButton *detailBackBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    detailBackBtn.frame = CGRectMake(10, 10, 68, 30);
+    detailBackBtn.frame = CGRectMake(10, 6, 64, 28);
     [detailBackBtn setTitle:@"‹ 返回" forState:UIControlStateNormal];
-    detailBackBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    detailBackBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
     [detailBackBtn setTitleColor:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1] forState:UIControlStateNormal];
     [detailBackBtn addTarget:self action:@selector(closeSkillDetail) forControlEvents:UIControlEventTouchUpInside];
     [_skillDetailContainer addSubview:detailBackBtn];
 
-    _skillDetailTitle = [[UILabel alloc] initWithFrame:CGRectMake(76, 10, w - 24 - 76 - 116, 30)];
+    _skillDetailTitle = [[UILabel alloc] initWithFrame:CGRectMake(74, 6, w - 24 - 74 - 110, 28)];
     _skillDetailTitle.textAlignment = NSTextAlignmentCenter;
-    _skillDetailTitle.font = [UIFont boldSystemFontOfSize:15];
+    _skillDetailTitle.font = [UIFont boldSystemFontOfSize:14];
     _skillDetailTitle.textColor = [UIColor whiteColor];
     [_skillDetailContainer addSubview:_skillDetailTitle];
 
     UIButton *editSkillBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    editSkillBtn.frame = CGRectMake(w - 24 - 116, 10, 52, 30);
+    editSkillBtn.frame = CGRectMake(w - 24 - 110, 6, 50, 28);
     [editSkillBtn setTitle:@"✏️ 编辑" forState:UIControlStateNormal];
-    editSkillBtn.titleLabel.font = [UIFont systemFontOfSize:13];
+    editSkillBtn.titleLabel.font = [UIFont systemFontOfSize:12];
     [editSkillBtn setTitleColor:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1] forState:UIControlStateNormal];
     [editSkillBtn addTarget:self action:@selector(onOpenSkillEdit) forControlEvents:UIControlEventTouchUpInside];
     [_skillDetailContainer addSubview:editSkillBtn];
 
     UIButton *deleteSkillBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    deleteSkillBtn.frame = CGRectMake(w - 24 - 58, 10, 50, 30);
+    deleteSkillBtn.frame = CGRectMake(w - 24 - 56, 6, 48, 28);
     [deleteSkillBtn setTitle:@"删除" forState:UIControlStateNormal];
-    deleteSkillBtn.titleLabel.font = [UIFont systemFontOfSize:13];
+    deleteSkillBtn.titleLabel.font = [UIFont systemFontOfSize:12];
     [deleteSkillBtn setTitleColor:[UIColor colorWithRed:0.898 green:0.329 blue:0.294 alpha:1] forState:UIControlStateNormal];
     [deleteSkillBtn addTarget:self action:@selector(onDeleteInspectingSkill) forControlEvents:UIControlEventTouchUpInside];
     [_skillDetailContainer addSubview:deleteSkillBtn];
 
-    UIView *detailDivider1 = [[UIView alloc] initWithFrame:CGRectMake(0, 42, w - 24, 1)];
+    UIView *detailDivider1 = [[UIView alloc] initWithFrame:CGRectMake(0, 36, w - 24, 1)];
     detailDivider1.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
     [_skillDetailContainer addSubview:detailDivider1];
 
-    _skillDetailAppLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 46, w - 24 - 32, 18)];
-    _skillDetailAppLabel.font = [UIFont systemFontOfSize:12];
+    _skillDetailAppLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 39, w - 24 - 32, 15)];
+    _skillDetailAppLabel.font = [UIFont systemFontOfSize:11];
     _skillDetailAppLabel.textColor = [UIColor colorWithWhite:1 alpha:0.7];
     [_skillDetailContainer addSubview:_skillDetailAppLabel];
 
-    _skillDetailStepsLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 66, w - 24 - 32, 18)];
-    _skillDetailStepsLabel.font = [UIFont systemFontOfSize:12];
+    _skillDetailStepsLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 54, w - 24 - 32, 15)];
+    _skillDetailStepsLabel.font = [UIFont systemFontOfSize:11];
     _skillDetailStepsLabel.textColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1];
     [_skillDetailContainer addSubview:_skillDetailStepsLabel];
 
-    UIView *detailDivider2 = [[UIView alloc] initWithFrame:CGRectMake(0, 88, w - 24, 1)];
+    UIView *detailDivider2 = [[UIView alloc] initWithFrame:CGRectMake(0, 71, w - 24, 1)];
     detailDivider2.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
     [_skillDetailContainer addSubview:detailDivider2];
 
-    UILabel *roundsSectionTitle = [[UILabel alloc] initWithFrame:CGRectMake(16, 94, w - 24 - 32, 18)];
+    UILabel *roundsSectionTitle = [[UILabel alloc] initWithFrame:CGRectMake(16, 74, w - 24 - 32, 15)];
     roundsSectionTitle.text = @"计划执行轮次：";
-    roundsSectionTitle.font = [UIFont boldSystemFontOfSize:12];
+    roundsSectionTitle.font = [UIFont boldSystemFontOfSize:11];
     roundsSectionTitle.textColor = [UIColor colorWithWhite:1 alpha:0.6];
     [_skillDetailContainer addSubview:roundsSectionTitle];
 
     UIButton *minus10Btn = [UIButton buttonWithType:UIButtonTypeSystem];
-    minus10Btn.frame = CGRectMake(24, 116, 68, 34);
+    minus10Btn.frame = CGRectMake(24, 91, 60, 28);
     [minus10Btn setTitle:@"- 10" forState:UIControlStateNormal];
-    minus10Btn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    minus10Btn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
     [minus10Btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     minus10Btn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12];
-    minus10Btn.layer.cornerRadius = 10;
+    minus10Btn.layer.cornerRadius = 8;
     [minus10Btn addTarget:self action:@selector(onRoundsMinus10) forControlEvents:UIControlEventTouchUpInside];
     [_skillDetailContainer addSubview:minus10Btn];
 
-    _roundsField = [[UITextField alloc] initWithFrame:CGRectMake(24 + 68 + 12, 116, w - 24 - 48 - 136 - 24, 34)];
-    _roundsField.font = [UIFont boldSystemFontOfSize:20];
+    _roundsField = [[UITextField alloc] initWithFrame:CGRectMake(24 + 60 + 10, 91, w - 24 - 48 - 120 - 20, 28)];
+    _roundsField.font = [UIFont boldSystemFontOfSize:17];
     _roundsField.textColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1];
     _roundsField.textAlignment = NSTextAlignmentCenter;
     _roundsField.keyboardType = UIKeyboardTypeNumberPad;
     _roundsField.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
-    _roundsField.layer.cornerRadius = 10;
+    _roundsField.layer.cornerRadius = 8;
     _roundsField.layer.borderWidth = 1;
     _roundsField.layer.borderColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.40].CGColor;
     [_roundsField addTarget:self action:@selector(onRoundsFieldChanged:) forControlEvents:UIControlEventEditingChanged];
     [_skillDetailContainer addSubview:_roundsField];
 
     UIButton *plus10Btn = [UIButton buttonWithType:UIButtonTypeSystem];
-    plus10Btn.frame = CGRectMake(w - 24 - 24 - 68, 116, 68, 34);
+    plus10Btn.frame = CGRectMake(w - 24 - 24 - 60, 91, 60, 28);
     [plus10Btn setTitle:@"+ 10" forState:UIControlStateNormal];
-    plus10Btn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    plus10Btn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
     [plus10Btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     plus10Btn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12];
-    plus10Btn.layer.cornerRadius = 10;
+    plus10Btn.layer.cornerRadius = 8;
     [plus10Btn addTarget:self action:@selector(onRoundsPlus10) forControlEvents:UIControlEventTouchUpInside];
     [_skillDetailContainer addSubview:plus10Btn];
 
-    _roundsBudgetLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 154, w - 24 - 32, 18)];
+    _roundsBudgetLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 121, w - 24 - 32, 15)];
     _roundsBudgetLabel.textAlignment = NSTextAlignmentCenter;
-    _roundsBudgetLabel.font = [UIFont systemFontOfSize:11];
+    _roundsBudgetLabel.font = [UIFont systemFontOfSize:10];
     _roundsBudgetLabel.textColor = [UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:0.9];
     [_skillDetailContainer addSubview:_roundsBudgetLabel];
 
-    UIView *detailDivider3 = [[UIView alloc] initWithFrame:CGRectMake(0, 176, w - 24, 1)];
+    UIView *detailDivider3 = [[UIView alloc] initWithFrame:CGRectMake(0, 138, w - 24, 1)];
     detailDivider3.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
     [_skillDetailContainer addSubview:detailDivider3];
 
     _startRunButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    _startRunButton.frame = CGRectMake(20, 184, w - 24 - 40, 40);
-    _startRunButton.titleLabel.font = [UIFont boldSystemFontOfSize:15];
+    _startRunButton.frame = CGRectMake(20, 143, w - 24 - 40, 32);
+    _startRunButton.titleLabel.font = [UIFont boldSystemFontOfSize:14];
     [_startRunButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     _startRunButton.backgroundColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.95];
-    _startRunButton.layer.cornerRadius = 12;
+    _startRunButton.layer.cornerRadius = 10;
     [_startRunButton addTarget:self action:@selector(onStartCustomRounds) forControlEvents:UIControlEventTouchUpInside];
     [_skillDetailContainer addSubview:_startRunButton];
 
     UIButton *singleTestBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    singleTestBtn.frame = CGRectMake(20, 232, w - 24 - 40, 34);
+    singleTestBtn.frame = CGRectMake(20, 180, w - 24 - 40, 28);
     [singleTestBtn setTitle:@"⚡ 单次测试 (1 轮)" forState:UIControlStateNormal];
-    singleTestBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+    singleTestBtn.titleLabel.font = [UIFont boldSystemFontOfSize:12];
     [singleTestBtn setTitleColor:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1] forState:UIControlStateNormal];
     singleTestBtn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
     singleTestBtn.layer.borderWidth = 1;
     singleTestBtn.layer.borderColor = [UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:0.35].CGColor;
-    singleTestBtn.layer.cornerRadius = 10;
+    singleTestBtn.layer.cornerRadius = 9;
     [singleTestBtn addTarget:self action:@selector(onStartSingleTest) forControlEvents:UIControlEventTouchUpInside];
     [_skillDetailContainer addSubview:singleTestBtn];
 
     UIButton *exportBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    exportBtn.frame = CGRectMake(20, 274, w - 24 - 40, 30);
+    exportBtn.frame = CGRectMake(20, 212, w - 24 - 40, 24);
     [exportBtn setTitle:@"📋 导出并复制口令" forState:UIControlStateNormal];
-    exportBtn.titleLabel.font = [UIFont systemFontOfSize:12];
+    exportBtn.titleLabel.font = [UIFont systemFontOfSize:11];
     [exportBtn setTitleColor:[UIColor colorWithWhite:1 alpha:0.6] forState:UIControlStateNormal];
     [exportBtn addTarget:self action:@selector(onExportSkillDetail) forControlEvents:UIControlEventTouchUpInside];
     [_skillDetailContainer addSubview:exportBtn];
@@ -712,90 +703,90 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     _skillEditContainer.hidden = YES;
 
     UIButton *cancelEditBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    cancelEditBtn.frame = CGRectMake(10, 10, 60, 30);
+    cancelEditBtn.frame = CGRectMake(10, 6, 56, 28);
     [cancelEditBtn setTitle:@"‹ 取消" forState:UIControlStateNormal];
-    cancelEditBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    cancelEditBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
     [cancelEditBtn setTitleColor:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1] forState:UIControlStateNormal];
     [cancelEditBtn addTarget:self action:@selector(onCancelSkillEdit) forControlEvents:UIControlEventTouchUpInside];
     [_skillEditContainer addSubview:cancelEditBtn];
 
-    UILabel *editHeaderTitle = [[UILabel alloc] initWithFrame:CGRectMake(70, 10, w - 24 - 140, 30)];
+    UILabel *editHeaderTitle = [[UILabel alloc] initWithFrame:CGRectMake(70, 6, w - 24 - 140, 28)];
     editHeaderTitle.text = @"编辑技能配方";
     editHeaderTitle.textAlignment = NSTextAlignmentCenter;
-    editHeaderTitle.font = [UIFont boldSystemFontOfSize:15];
+    editHeaderTitle.font = [UIFont boldSystemFontOfSize:14];
     editHeaderTitle.textColor = [UIColor whiteColor];
     [_skillEditContainer addSubview:editHeaderTitle];
 
     UIButton *saveEditBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    saveEditBtn.frame = CGRectMake(w - 24 - 64, 10, 54, 30);
+    saveEditBtn.frame = CGRectMake(w - 24 - 60, 6, 50, 28);
     [saveEditBtn setTitle:@"保存" forState:UIControlStateNormal];
-    saveEditBtn.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    saveEditBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
     [saveEditBtn setTitleColor:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1] forState:UIControlStateNormal];
     [saveEditBtn addTarget:self action:@selector(onSaveSkillEdit) forControlEvents:UIControlEventTouchUpInside];
     [_skillEditContainer addSubview:saveEditBtn];
 
-    UIView *editDivider1 = [[UIView alloc] initWithFrame:CGRectMake(0, 44, w - 24, 1)];
+    UIView *editDivider1 = [[UIView alloc] initWithFrame:CGRectMake(0, 36, w - 24, 1)];
     editDivider1.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
     [_skillEditContainer addSubview:editDivider1];
 
     CGFloat contentW = w - 24 - 28;
 
-    UILabel *nameLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 50, contentW, 16)];
+    UILabel *nameLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 39, contentW, 14)];
     nameLabel.text = @"技能名称";
-    nameLabel.font = [UIFont boldSystemFontOfSize:11];
+    nameLabel.font = [UIFont boldSystemFontOfSize:10.5];
     nameLabel.textColor = [UIColor colorWithWhite:1 alpha:0.5];
     [_skillEditContainer addSubview:nameLabel];
 
-    _editNameField = [[UITextField alloc] initWithFrame:CGRectMake(14, 68, contentW, 30)];
-    _editNameField.font = [UIFont boldSystemFontOfSize:13];
+    _editNameField = [[UITextField alloc] initWithFrame:CGRectMake(14, 53, contentW, 26)];
+    _editNameField.font = [UIFont boldSystemFontOfSize:12];
     _editNameField.textColor = [UIColor whiteColor];
     _editNameField.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
-    _editNameField.layer.cornerRadius = 8;
+    _editNameField.layer.cornerRadius = 7;
     _editNameField.layer.borderWidth = 0.5;
     _editNameField.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.2].CGColor;
-    _editNameField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 8, 30)];
+    _editNameField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 8, 26)];
     _editNameField.leftViewMode = UITextFieldViewModeAlways;
     [_editNameField setKeyboardAppearance:UIKeyboardAppearanceDark];
     [_skillEditContainer addSubview:_editNameField];
 
-    UILabel *loopLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 104, contentW, 16)];
+    UILabel *loopLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 81, contentW, 14)];
     loopLabel.text = @"循环核心步骤 (每行一步，描述具体可见文本)";
-    loopLabel.font = [UIFont boldSystemFontOfSize:11];
+    loopLabel.font = [UIFont boldSystemFontOfSize:10.5];
     loopLabel.textColor = [UIColor colorWithWhite:1 alpha:0.5];
     [_skillEditContainer addSubview:loopLabel];
 
-    _editLoopView = [[UITextView alloc] initWithFrame:CGRectMake(14, 122, contentW, 96)];
-    _editLoopView.font = [UIFont systemFontOfSize:12];
+    _editLoopView = [[UITextView alloc] initWithFrame:CGRectMake(14, 95, contentW, 56)];
+    _editLoopView.font = [UIFont systemFontOfSize:11];
     _editLoopView.textColor = [UIColor whiteColor];
     _editLoopView.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
-    _editLoopView.layer.cornerRadius = 8;
+    _editLoopView.layer.cornerRadius = 7;
     _editLoopView.layer.borderWidth = 0.5;
     _editLoopView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.2].CGColor;
-    _editLoopView.textContainerInset = UIEdgeInsetsMake(6, 6, 6, 6);
+    _editLoopView.textContainerInset = UIEdgeInsetsMake(4, 4, 4, 4);
     [_editLoopView setKeyboardAppearance:UIKeyboardAppearanceDark];
     [_skillEditContainer addSubview:_editLoopView];
 
-    UILabel *stopLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 224, contentW, 16)];
+    UILabel *stopLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 153, contentW, 14)];
     stopLabel.text = @"停止条件 (什么时候算完成)";
-    stopLabel.font = [UIFont boldSystemFontOfSize:11];
+    stopLabel.font = [UIFont boldSystemFontOfSize:10.5];
     stopLabel.textColor = [UIColor colorWithWhite:1 alpha:0.5];
     [_skillEditContainer addSubview:stopLabel];
 
-    _editStopField = [[UITextField alloc] initWithFrame:CGRectMake(14, 242, contentW, 30)];
-    _editStopField.font = [UIFont systemFontOfSize:12];
+    _editStopField = [[UITextField alloc] initWithFrame:CGRectMake(14, 167, contentW, 26)];
+    _editStopField.font = [UIFont systemFontOfSize:11.5];
     _editStopField.textColor = [UIColor whiteColor];
     _editStopField.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
-    _editStopField.layer.cornerRadius = 8;
+    _editStopField.layer.cornerRadius = 7;
     _editStopField.layer.borderWidth = 0.5;
     _editStopField.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.2].CGColor;
-    _editStopField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 8, 30)];
+    _editStopField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 8, 26)];
     _editStopField.leftViewMode = UITextFieldViewModeAlways;
     [_editStopField setKeyboardAppearance:UIKeyboardAppearanceDark];
     [_skillEditContainer addSubview:_editStopField];
 
-    UILabel *tipLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 278, contentW, 36)];
+    UILabel *tipLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 196, contentW, 30)];
     tipLabel.text = @"💡 提示：步骤请使用具体动作词（如“点击”、“输入”），尽量指定手机上能看到的真实字眼。大模型天然支持语义泛化。";
-    tipLabel.font = [UIFont systemFontOfSize:10];
+    tipLabel.font = [UIFont systemFontOfSize:9];
     tipLabel.textColor = [UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:0.85];
     tipLabel.numberOfLines = 2;
     [_skillEditContainer addSubview:tipLabel];
@@ -804,16 +795,27 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 
     [_panel addSubview:_skillContainer];
 
-    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 172, panelW - 28, 16)];
+    _divider = [[UIView alloc] initWithFrame:CGRectMake(12, 110, panelW - 24, 0.5)];
+    _divider.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    [_panel addSubview:_divider];
+
+    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 114, panelW - 28 - 65, 14)];
     _statusLabel.font = [UIFont systemFontOfSize:10];
     _statusLabel.textColor = [UIColor colorWithWhite:1 alpha:0.42];
     [_panel addSubview:_statusLabel];
 
-    _table = [[UITableView alloc] initWithFrame:CGRectMake(0, 190, panelW, 118)
+    _counter = [[UILabel alloc] initWithFrame:CGRectMake(panelW - 14 - 65, 114, 65, 14)];
+    _counter.text = @"0 / 500";
+    _counter.font = [UIFont monospacedDigitSystemFontOfSize:9.5 weight:UIFontWeightRegular];
+    _counter.textColor = [UIColor colorWithWhite:1 alpha:0.42];
+    _counter.textAlignment = NSTextAlignmentRight;
+    [_panel addSubview:_counter];
+
+    _table = [[UITableView alloc] initWithFrame:CGRectMake(0, 130, panelW, 94)
                                          style:UITableViewStylePlain];
     _table.backgroundColor = [UIColor clearColor];
     _table.separatorColor = [UIColor colorWithWhite:1 alpha:0.05];
-    _table.rowHeight = 44;
+    _table.rowHeight = 33;
     _table.dataSource = self;
     _table.delegate = self;
     _table.scrollEnabled = YES;
@@ -821,42 +823,42 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     [_panel addSubview:_table];
 
     // Telemetry Dashboard (3 badges)
-    _telemetryBar = [[UIView alloc] initWithFrame:CGRectMake(actionMargin, 316, panelW - 2 * actionMargin, 26)];
+    _telemetryBar = [[UIView alloc] initWithFrame:CGRectMake(actionMargin, 229, panelW - 2 * actionMargin, 22)];
     _telemetryBar.backgroundColor = [UIColor clearColor];
     [_panel addSubview:_telemetryBar];
 
     CGFloat teleW = floor((panelW - 2 * actionMargin - 2 * actionGap) / 3.0);
-    _tokenBadge = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, teleW, 26)];
+    _tokenBadge = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, teleW, 22)];
     _tokenBadge.text = @"💎 0 Tok";
     _tokenBadge.textAlignment = NSTextAlignmentCenter;
-    _tokenBadge.font = [UIFont monospacedDigitSystemFontOfSize:10 weight:UIFontWeightMedium];
+    _tokenBadge.font = [UIFont monospacedDigitSystemFontOfSize:9.5 weight:UIFontWeightMedium];
     _tokenBadge.textColor = [UIColor colorWithWhite:1 alpha:0.55];
     _tokenBadge.backgroundColor = [UIColor colorWithWhite:1 alpha:0.06];
-    _tokenBadge.layer.cornerRadius = 7;
+    _tokenBadge.layer.cornerRadius = 6;
     _tokenBadge.layer.borderWidth = 0.5;
     _tokenBadge.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.08].CGColor;
     _tokenBadge.layer.masksToBounds = YES;
     [_telemetryBar addSubview:_tokenBadge];
 
-    _stepBadge = [[UILabel alloc] initWithFrame:CGRectMake(teleW + actionGap, 0, teleW, 26)];
+    _stepBadge = [[UILabel alloc] initWithFrame:CGRectMake(teleW + actionGap, 0, teleW, 22)];
     _stepBadge.text = @"🎯 步数 0/100";
     _stepBadge.textAlignment = NSTextAlignmentCenter;
-    _stepBadge.font = [UIFont monospacedDigitSystemFontOfSize:10 weight:UIFontWeightMedium];
+    _stepBadge.font = [UIFont monospacedDigitSystemFontOfSize:9.5 weight:UIFontWeightMedium];
     _stepBadge.textColor = [UIColor colorWithWhite:1 alpha:0.55];
     _stepBadge.backgroundColor = [UIColor colorWithWhite:1 alpha:0.06];
-    _stepBadge.layer.cornerRadius = 7;
+    _stepBadge.layer.cornerRadius = 6;
     _stepBadge.layer.borderWidth = 0.5;
     _stepBadge.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.08].CGColor;
     _stepBadge.layer.masksToBounds = YES;
     [_telemetryBar addSubview:_stepBadge];
 
-    _timeBadge = [[UILabel alloc] initWithFrame:CGRectMake(2 * (teleW + actionGap), 0, teleW, 26)];
+    _timeBadge = [[UILabel alloc] initWithFrame:CGRectMake(2 * (teleW + actionGap), 0, teleW, 22)];
     _timeBadge.text = @"⏱ 耗时 0.0s";
     _timeBadge.textAlignment = NSTextAlignmentCenter;
-    _timeBadge.font = [UIFont monospacedDigitSystemFontOfSize:10 weight:UIFontWeightMedium];
+    _timeBadge.font = [UIFont monospacedDigitSystemFontOfSize:9.5 weight:UIFontWeightMedium];
     _timeBadge.textColor = [UIColor colorWithWhite:1 alpha:0.55];
     _timeBadge.backgroundColor = [UIColor colorWithWhite:1 alpha:0.06];
-    _timeBadge.layer.cornerRadius = 7;
+    _timeBadge.layer.cornerRadius = 6;
     _timeBadge.layer.borderWidth = 0.5;
     _timeBadge.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.08].CGColor;
     _timeBadge.layer.masksToBounds = YES;
@@ -2102,7 +2104,7 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     }
 
     _recording = NO;
-    [_recordButton setTitle:@"● 空间录制" forState:UIControlStateNormal];
+    [_recordButton setTitle:@"● 技能录制" forState:UIControlStateNormal];
     _recordButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
     _recordButton.layer.borderColor = [UIColor colorWithRed:0.95 green:0.35 blue:0.35 alpha:0.35].CGColor;
     [self setBarToIdleState];
