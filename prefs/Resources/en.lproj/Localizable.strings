@@ -17,6 +17,9 @@
 "日志位于 /var/mobile/Library/Logs/iOSDeb/ios-deb.log" = "Logs: /var/mobile/Library/Logs/iOSDeb/ios-deb.log";
 "详细日志" = "Verbose Logging";
 "清空日志" = "Clear Logs";
+"在线更新" = "Online Update";
+"当前安装版本：v2.1.5。点击连接 GitHub 检查最新发布版本并一键自动提权安装。" = "Installed: v2.1.5. Check GitHub Releases for the latest update and auto-install with root privileges.";
+"检查并在线更新" = "Check & Install Update";
 "还差一点" = "Missing fields";
 "API 地址、Key、模型名三项都要填。" = "Base URL, key and model are all required.";
 "正在测试" = "Testing";

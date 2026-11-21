@@ -32,6 +32,9 @@ It completely frees mobile automation from computer tethering (USB/WiFi ADB) and
   - **Offline Lexicon & Morphology**: Embedded with 17,970 core vocabulary entries and 23,794 lemmatization rules, completing inflection reduction and definition retrieval in <1ms on-device.
   - **Instant Fast-Bypass Matching**: Directly scores spatial geometry and meaning intersections between screen English words and Chinese options in <0.2s, with 0 network calls and 0 token consumption.
   - **Spatial Translation Foundation**: Implements `IOSDebTranslatedSpan` abstraction with physical coordinates and on-device translation tools.
+- 🔄 **Online Update & Privileged Auto-Installation**:
+  - **Multi-Entry Discovery**: Dedicated "Online Update" pane in iOS Settings and discreet "⟳ Update" badge in the SpringBoard floating panel; supports natural language update voice commands.
+  - **Root-Privileged Silent Installation**: Downloads the latest GitHub Release deb natively and leverages on-device SUID Root `mcp-root /usr/bin/dpkg -i` to unpack and respring SpringBoard automatically.
 
 ---
 
@@ -86,14 +89,14 @@ chmod +x build_roothide.sh
 ./build_roothide.sh
 ```
 
-A `.deb` package (e.g. `com.witchan.ios-deb_2.1.4_iphoneos-arm64e.deb`) will be generated in `packages/`.
+A `.deb` package (e.g. `com.witchan.ios-deb_2.1.5_iphoneos-arm64e.deb`) will be generated in `packages/`.
 
 ### Deployment
 
 Install directly onto your device via `dpkg`:
 
 ```bash
-dpkg -i com.witchan.ios-deb_2.1.4_iphoneos-arm64e.deb
+dpkg -i com.witchan.ios-deb_2.1.5_iphoneos-arm64e.deb
 killall -9 SpringBoard
 ```
 

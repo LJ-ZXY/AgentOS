@@ -1,4 +1,5 @@
 #import "IOSDebFloatingPanel.h"
+#import "IOSDebUpdater.h"
 #import "IOSDebAgent.h"
 #import "IOSDebMCPClient.h"
 #import "IOSDebLLMClient.h"
@@ -291,6 +292,18 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     title.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
     title.textColor = [UIColor whiteColor];
     [_panel addSubview:title];
+
+    UIButton *updateBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    updateBtn.frame = CGRectMake(w - 24 - 40 - 58, 8, 52, 26);
+    [updateBtn setTitle:@"⟳ 更新" forState:UIControlStateNormal];
+    updateBtn.titleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+    [updateBtn setTitleColor:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1] forState:UIControlStateNormal];
+    updateBtn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+    updateBtn.layer.cornerRadius = 13;
+    updateBtn.layer.borderWidth = 1;
+    updateBtn.layer.borderColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.35].CGColor;
+    [updateBtn addTarget:self action:@selector(onCheckUpdate) forControlEvents:UIControlEventTouchUpInside];
+    [_panel addSubview:updateBtn];
 
     UIButton *collapse = [UIButton buttonWithType:UIButtonTypeSystem];
     collapse.frame = CGRectMake(w - 24 - 40, 6, 34, 30);
@@ -1649,6 +1662,15 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
     [[self topViewController] presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)onCheckUpdate {
+    UIViewController *topVC = [self topViewController];
+    if (topVC) {
+        [[IOSDebUpdater shared] presentUpdateFlowFromViewController:topVC];
+    } else {
+        [self setStatus:@"无法获取顶层视图以展示更新弹窗" color:[UIColor orangeColor]];
+    }
 }
 
 - (void)onExportSkillDetail {

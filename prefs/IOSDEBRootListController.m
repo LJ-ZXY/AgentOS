@@ -1,4 +1,5 @@
 #import "IOSDEBRootListController.h"
+#import "IOSDebUpdater.h"
 #import <UIKit/UIKit.h>
 
 /// The Settings bundle cannot link against the tweak's classes (they live in
@@ -224,6 +225,10 @@ static NSString *const kDefaultEndpoint = @"http://127.0.0.1:8090/mcp";
     }
     [self showTitle:(removed ? @"已清空" : @"无需清理")
             message:(removed ? @"日志文件已删除。" : @"当前没有日志文件。")];
+}
+
+- (void)checkOnlineUpdate:(PSSpecifier *)specifier {
+    [[IOSDebUpdater shared] presentUpdateFlowFromViewController:self];
 }
 
 #pragma mark - Preference bridging

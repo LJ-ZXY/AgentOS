@@ -25,6 +25,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)hide;
 - (void)expand;
 - (void)collapse;
+- (void)onCheckUpdate;
 
 @end
 

@@ -46,6 +46,9 @@
   - **设置入口全局统一**：系统「设置」中统一收拢至「AgentOS」唯一入口，底层服务（端口配置、服务启停、调试日志）无缝内嵌为二级子面板，彻底净化系统设置列表。
 - ⚡ **抽屉式技能中心与自定义轮次（Custom Rounds & Safe Stepper）**：
   - 点击「⚡ 技能库」平滑唤出垂直全景抽屉，长技能名完整展示零截断。
+- 🔄 **在线更新与一键提权自动安装（Online Update & SUID Root Auto-Install）**：
+  - **多端触达入口**：在系统「设置 -> AgentOS」新增专属「在线更新」面板，并在 SpringBoard 悬浮面板顶部集成极简「⟳ 更新」徽章，支持直接说“检查更新”唤起升级流程。
+  - **高权限双通道静默安装**：端侧原生下载最新 GitHub Release deb 资产，优先通过本机回环 MCP 服务调用 RootHelper，兜底直调 SUID Root `mcp-root /usr/bin/dpkg -i` 完成特权解包覆盖与 SpringBoard 热重载，告别繁琐的电脑连接与手工安装。
   - **自定义轮次与快捷步进**：点击技能进入详情，支持直接输入自定义目标轮数（如 100 轮），并配有 `[-10]` / `[+10]` 快捷步进按钮。
   - **动态步数配额保障（Dynamic Step Budgeting）**：系统根据任务循环体特征自动换算并分配安全步数（突破原 100 步硬上限），跑大轮次任务不被中途打断。
   - **反死循环与界面停滞熔断（Circuit Breakers）**：连续 3 次相同操作无响应或连续 4 次画面无变化时，自动触发安全熔断保护，防止后台无限空转与烧耗 Token。
@@ -112,14 +115,14 @@ chmod +x build_roothide.sh
 ./build_roothide.sh
 ```
 
-构建成功后，将在 `packages/` 目录下生成类似 `com.witchan.ios-deb_2.1.4_iphoneos-arm64e.deb` 安装包。
+构建成功后，将在 `packages/` 目录下生成类似 `com.witchan.ios-deb_2.1.5_iphoneos-arm64e.deb` 安装包。
 
 ### 设备安装与部署
 
 可直接推送到越狱设备并通过 `dpkg` 安装：
 
 ```bash
-dpkg -i com.witchan.ios-deb_2.1.4_iphoneos-arm64e.deb
+dpkg -i com.witchan.ios-deb_2.1.5_iphoneos-arm64e.deb
 killall -9 SpringBoard
 ```
 

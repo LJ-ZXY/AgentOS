@@ -759,6 +759,20 @@ static NSString *IOSDebHumanTool(NSString *name) {
     }
     if (instruction.length == 0) return;
 
+    NSString *trim = [instruction stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if ([trim isEqualToString:@"检查更新"] ||
+        [trim isEqualToString:@"在线更新"] ||
+        [trim isEqualToString:@"升级"] ||
+        [trim isEqualToString:@"升级插件"] ||
+        [trim isEqualToString:@"更新插件"] ||
+        [trim isEqualToString:@"更新AgentOS"] ||
+        [trim isEqualToString:@"更新 AgentOS"]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[IOSDebFloatingPanel shared] onCheckUpdate];
+        });
+        return;
+    }
+
     IOSDebStore *store = [IOSDebStore shared];
     if (![store isAIConfigured]) {
         [self emit:IOSDebAgentEventError step:nil message:@"尚未配置模型"];

@@ -26,7 +26,8 @@ ios-deb_FILES = Tweak.x \
                 IOSDebRecorder.m \
                 IOSDebLexicon.m \
                 IOSDebQuizState.m \
-                IOSDebFloatingPanel.m
+                IOSDebFloatingPanel.m \
+                IOSDebUpdater.m
 
 ios-deb_CFLAGS = -fobjc-arc -Wno-unused-function -Wno-deprecated-declarations
 ios-deb_FRAMEWORKS = UIKit Foundation CoreGraphics QuartzCore AudioToolbox AVFoundation
@@ -44,7 +45,8 @@ iosdebprefs_FILES = prefs/IOSDEBRootListController.m \
                     prefs/IOSDEBQRCodeCell.m \
                     prefs/IOSMCPRootListController.m \
                     prefs/IOSMCPLocalization.m \
-                    MCPLogger.m
+                    MCPLogger.m \
+                    IOSDebUpdater.m
 iosdebprefs_CFLAGS = -fobjc-arc -Iprefs -I.
 iosdebprefs_FRAMEWORKS = UIKit CoreGraphics
 iosdebprefs_PRIVATE_FRAMEWORKS = Preferences
