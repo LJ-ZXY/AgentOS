@@ -167,23 +167,104 @@ didFinishDownloadingToURL:(NSURL *)location {
     return [[self stagingDirectory] stringByAppendingPathComponent:@"update_staging.deb"];
 }
 
+static void IOSDebParseVersion(NSString *versionStr, NSMutableArray<NSNumber *> *coreParts, NSMutableArray<NSString *> *prereleaseParts, BOOL *hasPrerelease) {
+    *hasPrerelease = NO;
+    if (!versionStr.length) {
+        [coreParts addObject:@0];
+        return;
+    }
+
+    NSString *clean = [versionStr stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    clean = [clean stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"vV"]];
+
+    // Find prerelease separator '-' or '~'
+    NSRange dashRange = [clean rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"-~"]];
+    NSString *coreStr = clean;
+    NSString *preStr = nil;
+    if (dashRange.location != NSNotFound) {
+        coreStr = [clean substringToIndex:dashRange.location];
+        preStr = [clean substringFromIndex:dashRange.location + 1];
+        *hasPrerelease = (preStr.length > 0);
+    }
+
+    NSArray *compCore = [coreStr componentsSeparatedByString:@"."];
+    for (NSString *c in compCore) {
+        [coreParts addObject:@([c integerValue])];
+    }
+    if (coreParts.count == 0) [coreParts addObject:@0];
+
+    if (preStr.length > 0) {
+        NSCharacterSet *splitSet = [NSCharacterSet characterSetWithCharactersInString:@".-"];
+        NSArray *pTokens = [preStr componentsSeparatedByCharactersInSet:splitSet];
+        for (NSString *tok in pTokens) {
+            NSString *trimmed = [tok stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+            if (trimmed.length > 0) {
+                [prereleaseParts addObject:trimmed];
+            }
+        }
+    }
+}
+
 + (NSComparisonResult)compareVersion:(NSString *)v1 toVersion:(NSString *)v2 {
+    if (!v1.length && !v2.length) return NSOrderedSame;
     if (!v1.length) return NSOrderedAscending;
     if (!v2.length) return NSOrderedDescending;
 
-    NSString *clean1 = [v1 stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"vV"]];
-    NSString *clean2 = [v2 stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"vV"]];
+    NSMutableArray<NSNumber *> *core1 = [NSMutableArray array];
+    NSMutableArray<NSString *> *pre1 = [NSMutableArray array];
+    BOOL hasPre1 = NO;
+    IOSDebParseVersion(v1, core1, pre1, &hasPre1);
 
-    NSArray *comp1 = [clean1 componentsSeparatedByString:@"."];
-    NSArray *comp2 = [clean2 componentsSeparatedByString:@"."];
-    NSInteger maxCount = MAX(comp1.count, comp2.count);
+    NSMutableArray<NSNumber *> *core2 = [NSMutableArray array];
+    NSMutableArray<NSString *> *pre2 = [NSMutableArray array];
+    BOOL hasPre2 = NO;
+    IOSDebParseVersion(v2, core2, pre2, &hasPre2);
 
-    for (NSInteger i = 0; i < maxCount; i++) {
-        NSInteger n1 = (i < comp1.count) ? [comp1[i] integerValue] : 0;
-        NSInteger n2 = (i < comp2.count) ? [comp2[i] integerValue] : 0;
+    NSInteger maxLen = MAX(core1.count, core2.count);
+    while (core1.count < maxLen) [core1 addObject:@0];
+    while (core2.count < maxLen) [core2 addObject:@0];
+
+    for (NSInteger i = 0; i < maxLen; i++) {
+        NSInteger n1 = [core1[i] integerValue];
+        NSInteger n2 = [core2[i] integerValue];
         if (n1 > n2) return NSOrderedDescending;
         if (n1 < n2) return NSOrderedAscending;
     }
+
+    // Core parts are equal.
+    // SemVer: a version without prerelease has higher precedence than one with prerelease.
+    if (!hasPre1 && !hasPre2) return NSOrderedSame;
+    if (!hasPre1 && hasPre2) return NSOrderedDescending; // v1 (final) > v2 (pre)
+    if (hasPre1 && !hasPre2) return NSOrderedAscending;  // v1 (pre) < v2 (final)
+
+    // Both have prereleases: compare component by component
+    NSInteger minPre = MIN(pre1.count, pre2.count);
+    NSCharacterSet *digitOnly = [NSCharacterSet decimalDigitCharacterSet];
+    for (NSInteger i = 0; i < minPre; i++) {
+        NSString *p1 = pre1[i];
+        NSString *p2 = pre2[i];
+
+        BOOL p1IsNum = ([p1 rangeOfCharacterFromSet:[digitOnly invertedSet]].location == NSNotFound);
+        BOOL p2IsNum = ([p2 rangeOfCharacterFromSet:[digitOnly invertedSet]].location == NSNotFound);
+
+        if (p1IsNum && p2IsNum) {
+            NSInteger num1 = [p1 integerValue];
+            NSInteger num2 = [p2 integerValue];
+            if (num1 > num2) return NSOrderedDescending;
+            if (num1 < num2) return NSOrderedAscending;
+        } else if (p1IsNum && !p2IsNum) {
+            return NSOrderedAscending;
+        } else if (!p1IsNum && p2IsNum) {
+            return NSOrderedDescending;
+        } else {
+            NSComparisonResult strRes = [p1 compare:p2 options:NSCaseInsensitiveSearch];
+            if (strRes != NSOrderedSame) return strRes;
+        }
+    }
+
+    if (pre1.count > pre2.count) return NSOrderedDescending;
+    if (pre1.count < pre2.count) return NSOrderedAscending;
+
     return NSOrderedSame;
 }
 

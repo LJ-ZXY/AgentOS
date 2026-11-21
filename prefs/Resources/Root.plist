@@ -204,7 +204,7 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
-			<string>当前安装版本：v2.1.5。点击连接 GitHub 检查最新发布版本并一键自动提权安装。</string>
+			<string>当前安装版本：v2.1.6-beta.1。点击连接 GitHub 检查最新发布版本并一键自动提权安装。</string>
 			<key>label</key>
 			<string>在线更新</string>
 		</dict>

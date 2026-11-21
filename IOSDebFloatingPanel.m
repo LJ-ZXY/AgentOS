@@ -12,8 +12,9 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
 
-static CGFloat const kBarHeight = 40.0;
-static CGFloat const kPanelHeight = 360.0;
+static CGFloat const kBarHeight = 36.0;
+static CGFloat const kBarWidth = 68.0;
+static CGFloat const kPanelHeight = 356.0;
 static NSString *const kPosXKey = @"ui.barX";
 static NSString *const kPosYKey = @"ui.barY";
 
@@ -60,10 +61,13 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 @end
 
 @implementation IOSDebStepCell {
+    UIView *_timelineLine;
+    UIView *_dotRing;
+    UIView *_dot;
     UILabel *_badge;
+    UILabel *_toolTag;
     UILabel *_title;
     UILabel *_detail;
-    UIView *_dot;
 }
 
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuse {
@@ -71,47 +75,90 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         self.backgroundColor = [UIColor clearColor];
         self.selectionStyle = UITableViewCellSelectionStyleNone;
 
+        _timelineLine = [[UIView alloc] init];
+        _timelineLine.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+        _timelineLine.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.contentView addSubview:_timelineLine];
+
+        _dotRing = [[UIView alloc] init];
+        _dotRing.layer.cornerRadius = 6;
+        _dotRing.layer.borderWidth = 1.0;
+        _dotRing.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.18].CGColor;
+        _dotRing.backgroundColor = [UIColor clearColor];
+        _dotRing.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.contentView addSubview:_dotRing];
+
         _dot = [[UIView alloc] init];
-        _dot.layer.cornerRadius = 4;
+        _dot.layer.cornerRadius = 3;
+        _dot.layer.masksToBounds = YES;
         _dot.translatesAutoresizingMaskIntoConstraints = NO;
-        [self.contentView addSubview:_dot];
+        [_dotRing addSubview:_dot];
 
         _badge = [[UILabel alloc] init];
-        _badge.font = [UIFont monospacedDigitSystemFontOfSize:10 weight:UIFontWeightBold];
-        _badge.textColor = [UIColor colorWithWhite:1 alpha:0.55];
+        _badge.font = [UIFont monospacedDigitSystemFontOfSize:9 weight:UIFontWeightBold];
+        _badge.textColor = [UIColor colorWithWhite:1 alpha:0.65];
+        _badge.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+        _badge.layer.cornerRadius = 3;
+        _badge.layer.masksToBounds = YES;
+        _badge.textAlignment = NSTextAlignmentCenter;
         _badge.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:_badge];
 
+        _toolTag = [[UILabel alloc] init];
+        _toolTag.font = [UIFont monospacedSystemFontOfSize:9 weight:UIFontWeightBold];
+        _toolTag.textColor = [UIColor colorWithRed:0.4 green:0.8 blue:1.0 alpha:1.0];
+        _toolTag.backgroundColor = [UIColor colorWithRed:0.2 green:0.6 blue:1.0 alpha:0.15];
+        _toolTag.layer.cornerRadius = 3;
+        _toolTag.layer.masksToBounds = YES;
+        _toolTag.textAlignment = NSTextAlignmentCenter;
+        _toolTag.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.contentView addSubview:_toolTag];
+
         _title = [[UILabel alloc] init];
-        _title.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+        _title.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
         _title.textColor = [UIColor whiteColor];
         _title.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:_title];
 
         _detail = [[UILabel alloc] init];
         _detail.font = [UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightRegular];
-        _detail.textColor = [UIColor colorWithWhite:1 alpha:0.42];
+        _detail.textColor = [UIColor colorWithWhite:1 alpha:0.45];
         _detail.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:_detail];
 
         [NSLayoutConstraint activateConstraints:@[
-            [_dot.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:10],
-            [_dot.centerYAnchor constraintEqualToAnchor:_title.centerYAnchor],
-            [_dot.widthAnchor constraintEqualToConstant:8],
-            [_dot.heightAnchor constraintEqualToConstant:8],
+            [_timelineLine.centerXAnchor constraintEqualToAnchor:_dotRing.centerXAnchor],
+            [_timelineLine.topAnchor constraintEqualToAnchor:self.contentView.topAnchor],
+            [_timelineLine.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor],
+            [_timelineLine.widthAnchor constraintEqualToConstant:1],
 
-            [_badge.leadingAnchor constraintEqualToAnchor:_dot.trailingAnchor constant:7],
+            [_dotRing.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:12],
+            [_dotRing.centerYAnchor constraintEqualToAnchor:_title.centerYAnchor],
+            [_dotRing.widthAnchor constraintEqualToConstant:12],
+            [_dotRing.heightAnchor constraintEqualToConstant:12],
+
+            [_dot.centerXAnchor constraintEqualToAnchor:_dotRing.centerXAnchor],
+            [_dot.centerYAnchor constraintEqualToAnchor:_dotRing.centerYAnchor],
+            [_dot.widthAnchor constraintEqualToConstant:6],
+            [_dot.heightAnchor constraintEqualToConstant:6],
+
+            [_badge.leadingAnchor constraintEqualToAnchor:_dotRing.trailingAnchor constant:7],
             [_badge.centerYAnchor constraintEqualToAnchor:_title.centerYAnchor],
-            [_badge.widthAnchor constraintEqualToConstant:16],
+            [_badge.widthAnchor constraintGreaterThanOrEqualToConstant:14],
+            [_badge.heightAnchor constraintEqualToConstant:14],
 
-            [_title.leadingAnchor constraintEqualToAnchor:_badge.trailingAnchor constant:4],
+            [_toolTag.leadingAnchor constraintEqualToAnchor:_badge.trailingAnchor constant:5],
+            [_toolTag.centerYAnchor constraintEqualToAnchor:_title.centerYAnchor],
+            [_toolTag.heightAnchor constraintEqualToConstant:14],
+
+            [_title.leadingAnchor constraintEqualToAnchor:_toolTag.trailingAnchor constant:6],
             [_title.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-10],
-            [_title.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:7],
+            [_title.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:6],
 
             [_detail.leadingAnchor constraintEqualToAnchor:_title.leadingAnchor],
             [_detail.trailingAnchor constraintEqualToAnchor:_title.trailingAnchor],
             [_detail.topAnchor constraintEqualToAnchor:_title.bottomAnchor constant:2],
-            [_detail.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-7],
+            [_detail.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-6],
         ]];
     }
     return self;
@@ -127,7 +174,31 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     UIColor *ok = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1];
     UIColor *bad = [UIColor colorWithRed:0.898 green:0.329 blue:0.294 alpha:1];
     UIColor *run = [UIColor colorWithRed:0.431 green:0.659 blue:1 alpha:1];
-    _dot.backgroundColor = step.duration > 0 ? (step.ok ? ok : bad) : run;
+
+    UIColor *c = step.duration > 0 ? (step.ok ? ok : bad) : run;
+    _dot.backgroundColor = c;
+    _dotRing.layer.borderColor = [c colorWithAlphaComponent:0.35].CGColor;
+
+    NSString *t = step.toolName;
+    NSString *disp = @" ACT ";
+    if ([t isEqualToString:@"tap_screen"] || [t isEqualToString:@"tap_element"]) disp = @" TAP ";
+    else if ([t isEqualToString:@"ocr_screen"] || [t isEqualToString:@"describe_screen"]) disp = @" OCR ";
+    else if ([t isEqualToString:@"input_text"] || [t isEqualToString:@"type_text"]) disp = @" TXT ";
+    else if ([t isEqualToString:@"write_file"]) disp = @" WR ";
+    else if ([t isEqualToString:@"read_file"]) disp = @" RD ";
+    else if ([t isEqualToString:@"run_command"]) disp = @" CMD ";
+    else if ([t isEqualToString:@"launch_app"]) disp = @" APP ";
+    else if ([t isEqualToString:@"swipe_screen"]) disp = @" SWP ";
+    else if (t.length > 0) disp = [NSString stringWithFormat:@" %@ ", [t uppercaseString]];
+    _toolTag.text = disp;
+
+    if (step.duration > 0 && !step.ok) {
+        _toolTag.backgroundColor = [bad colorWithAlphaComponent:0.2];
+        _toolTag.textColor = bad;
+    } else {
+        _toolTag.backgroundColor = [UIColor colorWithRed:0.2 green:0.6 blue:1.0 alpha:0.15];
+        _toolTag.textColor = [UIColor colorWithRed:0.4 green:0.8 blue:1.0 alpha:1.0];
+    }
 }
 
 - (void)addQuizDescriptors:(NSMutableArray *)items {
@@ -148,7 +219,12 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 @implementation IOSDebFloatingPanel {
     IOSDebOverlayWindow *_window;
     UIView *_bar;
+    UIView *_statusDot;
     UIView *_panel;
+    UILabel *_brandLabel;
+    UILabel *_versionBadge;
+    UIButton *_updateBtn;
+    UIButton *_collapseBtn;
     UILabel *_barLabel;
     UITextView *_input;
     UILabel *_counter;
@@ -160,6 +236,11 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     UIView *_divider;
     UIButton *_skillLibButton;
     UIButton *_recordButton;
+    UIButton *_voiceButton;
+    UIView *_telemetryBar;
+    UILabel *_tokenBadge;
+    UILabel *_stepBadge;
+    UILabel *_timeBadge;
     UIView *_skillContainer;
     UITableView *_skillTable;
     UILabel *_skillEmptyLabel;
@@ -212,6 +293,10 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     return p;
 }
 
++ (NSString *)uiVersionString {
+    return AGENTOS_VERSION;
+}
+
 - (instancetype)init {
     if ((self = [super init])) {
         _steps = [NSMutableArray array];
@@ -239,20 +324,29 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     CGFloat savedX = [[NSUserDefaults standardUserDefaults] doubleForKey:kPosXKey];
     CGFloat savedY = [[NSUserDefaults standardUserDefaults] doubleForKey:kPosYKey];
     if (savedY <= 0 || savedY > h - 80) savedY = h * 0.40;
-    if (savedX <= 0 || savedX > w) savedX = w - 68;
+    if (savedX <= 0 || savedX > w) savedX = w - (kBarWidth + 8);
 
-    _bar = [[UIView alloc] initWithFrame:CGRectMake(savedX, savedY, 60, kBarHeight)];
-    _bar.backgroundColor = [self panelBackground];
+    _bar = [[UIView alloc] initWithFrame:CGRectMake(savedX, savedY, kBarWidth, kBarHeight)];
+    _bar.backgroundColor = [UIColor colorWithRed:0.045 green:0.065 blue:0.090 alpha:0.92];
     _bar.layer.cornerRadius = 18;
-    _bar.layer.borderWidth = 1;
-    _bar.layer.borderColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.45].CGColor;
+    if (@available(iOS 13.0, *)) {
+        _bar.layer.cornerCurve = kCACornerCurveContinuous;
+    }
+    _bar.layer.borderWidth = 0.5;
+    _bar.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.22].CGColor;
     _bar.layer.masksToBounds = YES;
 
-    _barLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 60, kBarHeight)];
-    _barLabel.text = @"AI";
+    _statusDot = [[UIView alloc] initWithFrame:CGRectMake(10, 14, 8, 8)];
+    _statusDot.backgroundColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1.0];
+    _statusDot.layer.cornerRadius = 4;
+    _statusDot.layer.masksToBounds = YES;
+    [_bar addSubview:_statusDot];
+
+    _barLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 0, 44, kBarHeight)];
+    _barLabel.text = @"Agent";
     _barLabel.textAlignment = NSTextAlignmentCenter;
-    _barLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
-    _barLabel.textColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1];
+    _barLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightBold];
+    _barLabel.textColor = [UIColor whiteColor];
     _barLabel.adjustsFontSizeToFitWidth = YES;
     _barLabel.minimumScaleFactor = 0.75;
     [_bar addSubview:_barLabel];
@@ -269,12 +363,15 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     [_bar addGestureRecognizer:longPress];
 
     // Panel (hidden until expanded).
-    _panel = [[UIView alloc] initWithFrame:CGRectMake(12, h - kPanelHeight - 12,
-                                                      w - 24, kPanelHeight)];
-    _panel.backgroundColor = [UIColor colorWithRed:0.055 green:0.075 blue:0.098 alpha:1.0];
-    _panel.layer.cornerRadius = 20;
-    _panel.layer.borderWidth = 1;
-    _panel.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.09].CGColor;
+    CGFloat panelW = w - 24;
+    _panel = [[UIView alloc] initWithFrame:CGRectMake(12, h - kPanelHeight - 12, panelW, kPanelHeight)];
+    _panel.backgroundColor = [UIColor colorWithRed:0.045 green:0.065 blue:0.090 alpha:0.92];
+    _panel.layer.cornerRadius = 22;
+    if (@available(iOS 13.0, *)) {
+        _panel.layer.cornerCurve = kCACornerCurveContinuous;
+    }
+    _panel.layer.borderWidth = 0.5;
+    _panel.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.14].CGColor;
     _panel.layer.masksToBounds = YES;
     _panel.hidden = YES;
 
@@ -287,102 +384,138 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         [_panel insertSubview:blurView atIndex:0];
     }
 
-    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(14, 12, 120, 20)];
-    title.text = @"AgentOS";
-    title.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    title.textColor = [UIColor whiteColor];
-    [_panel addSubview:title];
+    _brandLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 11, 74, 22)];
+    _brandLabel.text = @"AgentOS";
+    _brandLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightBold];
+    _brandLabel.textColor = [UIColor whiteColor];
+    [_panel addSubview:_brandLabel];
 
-    UIButton *updateBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    updateBtn.frame = CGRectMake(w - 24 - 40 - 58, 8, 52, 26);
-    [updateBtn setTitle:@"⟳ 更新" forState:UIControlStateNormal];
-    updateBtn.titleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
-    [updateBtn setTitleColor:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1] forState:UIControlStateNormal];
-    updateBtn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
-    updateBtn.layer.cornerRadius = 13;
-    updateBtn.layer.borderWidth = 1;
-    updateBtn.layer.borderColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.35].CGColor;
-    [updateBtn addTarget:self action:@selector(onCheckUpdate) forControlEvents:UIControlEventTouchUpInside];
-    [_panel addSubview:updateBtn];
+    _versionBadge = [[UILabel alloc] initWithFrame:CGRectMake(92, 13, 82, 18)];
+    _versionBadge.text = [NSString stringWithFormat:@"v%@", AGENTOS_VERSION];
+    _versionBadge.font = [UIFont monospacedDigitSystemFontOfSize:9 weight:UIFontWeightSemibold];
+    _versionBadge.textColor = [UIColor colorWithWhite:1 alpha:0.65];
+    _versionBadge.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    _versionBadge.layer.cornerRadius = 5;
+    _versionBadge.layer.borderWidth = 0.5;
+    _versionBadge.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
+    _versionBadge.layer.masksToBounds = YES;
+    _versionBadge.textAlignment = NSTextAlignmentCenter;
+    [_panel addSubview:_versionBadge];
 
-    UIButton *collapse = [UIButton buttonWithType:UIButtonTypeSystem];
-    collapse.frame = CGRectMake(w - 24 - 40, 6, 34, 30);
-    [collapse setTitle:@"▾" forState:UIControlStateNormal];
-    collapse.titleLabel.font = [UIFont systemFontOfSize:17];
-    [collapse addTarget:self action:@selector(collapse) forControlEvents:UIControlEventTouchUpInside];
-    [_panel addSubview:collapse];
+    _updateBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    _updateBtn.frame = CGRectMake(panelW - 14 - 28 - 8 - 56, 10, 56, 24);
+    [_updateBtn setTitle:@"⟳ 更新" forState:UIControlStateNormal];
+    _updateBtn.titleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+    [_updateBtn setTitleColor:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1] forState:UIControlStateNormal];
+    _updateBtn.backgroundColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.12];
+    _updateBtn.layer.cornerRadius = 12;
+    _updateBtn.layer.borderWidth = 0.5;
+    _updateBtn.layer.borderColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.35].CGColor;
+    [_updateBtn addTarget:self action:@selector(onCheckUpdate) forControlEvents:UIControlEventTouchUpInside];
+    [_panel addSubview:_updateBtn];
 
-    _input = [[UITextView alloc] initWithFrame:CGRectMake(12, 38, w - 24 - 24, 56)];
-    _input.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+    _collapseBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    _collapseBtn.frame = CGRectMake(panelW - 14 - 28, 8, 28, 28);
+    [_collapseBtn setTitle:@"▾" forState:UIControlStateNormal];
+    _collapseBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
+    [_collapseBtn setTitleColor:[UIColor colorWithWhite:1 alpha:0.75] forState:UIControlStateNormal];
+    _collapseBtn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    _collapseBtn.layer.cornerRadius = 14;
+    _collapseBtn.layer.borderWidth = 0.5;
+    _collapseBtn.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
+    [_collapseBtn addTarget:self action:@selector(collapse) forControlEvents:UIControlEventTouchUpInside];
+    [_panel addSubview:_collapseBtn];
+
+    _input = [[UITextView alloc] initWithFrame:CGRectMake(12, 40, panelW - 24, 54)];
+    _input.backgroundColor = [UIColor colorWithWhite:1 alpha:0.07];
     _input.layer.cornerRadius = 12;
-    _input.layer.borderWidth = 1;
-    _input.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
-    _input.textContainerInset = UIEdgeInsetsMake(8, 8, 8, 8);
-    _input.font = [UIFont systemFontOfSize:14];
+    if (@available(iOS 13.0, *)) {
+        _input.layer.cornerCurve = kCACornerCurveContinuous;
+    }
+    _input.layer.borderWidth = 0.5;
+    _input.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
+    _input.textContainerInset = UIEdgeInsetsMake(7, 8, 7, 8);
+    _input.font = [UIFont systemFontOfSize:13];
     _input.textColor = [UIColor whiteColor];
     _input.delegate = self;
     _input.returnKeyType = UIReturnKeySend;
     [_input setKeyboardAppearance:UIKeyboardAppearanceDark];
     [_panel addSubview:_input];
 
-    _counter = [[UILabel alloc] initWithFrame:CGRectMake(16, 98, 120, 16)];
+    _counter = [[UILabel alloc] initWithFrame:CGRectMake(16, 100, 120, 16)];
     _counter.text = @"0 / 500";
     _counter.font = [UIFont systemFontOfSize:10];
     _counter.textColor = [UIColor colorWithWhite:1 alpha:0.42];
     [_panel addSubview:_counter];
 
     _sendButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    _sendButton.frame = CGRectMake(w - 24 - 24 - 76, 96, 76, 30);
+    _sendButton.frame = CGRectMake(panelW - 12 - 76, 97, 76, 28);
     [_sendButton setTitle:@"发送" forState:UIControlStateNormal];
-    _sendButton.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+    _sendButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
     _sendButton.backgroundColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1];
     [_sendButton setTitleColor:[UIColor colorWithRed:0.016 green:0.078 blue:0.059 alpha:1]
                       forState:UIControlStateNormal];
-    _sendButton.layer.cornerRadius = 10;
+    _sendButton.layer.cornerRadius = 9;
     [_sendButton addTarget:self action:@selector(onSend) forControlEvents:UIControlEventTouchUpInside];
     [_panel addSubview:_sendButton];
 
     _stopButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _stopButton.frame = _sendButton.frame;
     [_stopButton setTitle:@"停止" forState:UIControlStateNormal];
-    _stopButton.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+    _stopButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
     _stopButton.backgroundColor = [UIColor colorWithRed:0.898 green:0.329 blue:0.294 alpha:1];
     [_stopButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    _stopButton.layer.cornerRadius = 10;
+    _stopButton.layer.cornerRadius = 9;
     _stopButton.hidden = YES;
     [_stopButton addTarget:self action:@selector(onStop) forControlEvents:UIControlEventTouchUpInside];
     [_panel addSubview:_stopButton];
 
-    _divider = [[UIView alloc] initWithFrame:CGRectMake(0, 128, w - 24, 1)];
-    _divider.backgroundColor = [UIColor colorWithWhite:1 alpha:0.06];
+    _divider = [[UIView alloc] initWithFrame:CGRectMake(12, 130, panelW - 24, 0.5)];
+    _divider.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
     [_panel addSubview:_divider];
 
-    // Skill chips: tap to run a saved recipe, long-press to delete, and the
-    // trailing "+" records a new one. Horizontal scroll keeps the row one line.
-    CGFloat chipY = 136;
-    CGFloat btnH = 32;
+    // Quick Action Clusters (3 pills: ⚡ 技能中心, ● 空间录制, 🎙 语音输入)
+    CGFloat chipY = 138;
+    CGFloat actionMargin = 12.0;
+    CGFloat actionGap = 8.0;
+    CGFloat actionW = floor((panelW - 2 * actionMargin - 2 * actionGap) / 3.0);
+    CGFloat actionH = 30.0;
 
     _skillLibButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    _skillLibButton.frame = CGRectMake(14, chipY, 136, btnH);
-    [_skillLibButton setTitle:@"⚡ 技能库" forState:UIControlStateNormal];
-    _skillLibButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
+    _skillLibButton.frame = CGRectMake(actionMargin, chipY, actionW, actionH);
+    [_skillLibButton setTitle:@"⚡ 技能中心" forState:UIControlStateNormal];
+    _skillLibButton.titleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
     [_skillLibButton setTitleColor:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1] forState:UIControlStateNormal];
-    _skillLibButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
-    _skillLibButton.layer.cornerRadius = 16;
-    _skillLibButton.layer.borderWidth = 1;
-    _skillLibButton.layer.borderColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.40].CGColor;
+    _skillLibButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    _skillLibButton.layer.cornerRadius = 15;
+    _skillLibButton.layer.borderWidth = 0.5;
+    _skillLibButton.layer.borderColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.35].CGColor;
     [_skillLibButton addTarget:self action:@selector(openSkillLibrary) forControlEvents:UIControlEventTouchUpInside];
     [_panel addSubview:_skillLibButton];
 
     _recordButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    _recordButton.frame = CGRectMake(w - 24 - 90 - 14, chipY, 90, btnH);
-    [_recordButton setTitle:@"● 录制" forState:UIControlStateNormal];
-    _recordButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-    [_recordButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    _recordButton.backgroundColor = [UIColor colorWithRed:0.898 green:0.329 blue:0.294 alpha:0.85];
-    _recordButton.layer.cornerRadius = 16;
+    _recordButton.frame = CGRectMake(actionMargin + actionW + actionGap, chipY, actionW, actionH);
+    [_recordButton setTitle:@"● 空间录制" forState:UIControlStateNormal];
+    _recordButton.titleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+    [_recordButton setTitleColor:[UIColor colorWithRed:0.95 green:0.35 blue:0.35 alpha:1] forState:UIControlStateNormal];
+    _recordButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    _recordButton.layer.cornerRadius = 15;
+    _recordButton.layer.borderWidth = 0.5;
+    _recordButton.layer.borderColor = [UIColor colorWithRed:0.95 green:0.35 blue:0.35 alpha:0.35].CGColor;
     [_recordButton addTarget:self action:@selector(onRecord) forControlEvents:UIControlEventTouchUpInside];
     [_panel addSubview:_recordButton];
+
+    _voiceButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _voiceButton.frame = CGRectMake(actionMargin + 2 * (actionW + actionGap), chipY, actionW, actionH);
+    [_voiceButton setTitle:@"🎙 语音输入" forState:UIControlStateNormal];
+    _voiceButton.titleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+    [_voiceButton setTitleColor:[UIColor colorWithRed:0.25 green:0.65 blue:1.0 alpha:1] forState:UIControlStateNormal];
+    _voiceButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    _voiceButton.layer.cornerRadius = 15;
+    _voiceButton.layer.borderWidth = 0.5;
+    _voiceButton.layer.borderColor = [UIColor colorWithRed:0.25 green:0.65 blue:1.0 alpha:0.35].CGColor;
+    [_voiceButton addTarget:self action:@selector(onVoiceButtonClick) forControlEvents:UIControlEventTouchUpInside];
+    [_panel addSubview:_voiceButton];
 
     // Skill Library Drawer Container (covers _panel, hidden by default)
     _skillContainer = [[UIView alloc] initWithFrame:_panel.bounds];
@@ -671,26 +804,66 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 
     [_panel addSubview:_skillContainer];
 
-    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 174, w - 52, 16)];
+    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 172, panelW - 28, 16)];
     _statusLabel.font = [UIFont systemFontOfSize:10];
     _statusLabel.textColor = [UIColor colorWithWhite:1 alpha:0.42];
     [_panel addSubview:_statusLabel];
 
-    _table = [[UITableView alloc] initWithFrame:CGRectMake(0, 194, w - 24, 100)
+    _table = [[UITableView alloc] initWithFrame:CGRectMake(0, 190, panelW, 118)
                                          style:UITableViewStylePlain];
     _table.backgroundColor = [UIColor clearColor];
     _table.separatorColor = [UIColor colorWithWhite:1 alpha:0.05];
-    _table.rowHeight = 46;
+    _table.rowHeight = 44;
     _table.dataSource = self;
     _table.delegate = self;
     _table.scrollEnabled = YES;
     [_table registerClass:[IOSDebStepCell class] forCellReuseIdentifier:@"step"];
     [_panel addSubview:_table];
 
-    _tokenLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 302, w - 28, 16)];
-    _tokenLabel.text = @"Token 0 · 上限 100 步";
-    _tokenLabel.font = [UIFont systemFontOfSize:10];
-    _tokenLabel.textColor = [UIColor colorWithWhite:1 alpha:0.38];
+    // Telemetry Dashboard (3 badges)
+    _telemetryBar = [[UIView alloc] initWithFrame:CGRectMake(actionMargin, 316, panelW - 2 * actionMargin, 26)];
+    _telemetryBar.backgroundColor = [UIColor clearColor];
+    [_panel addSubview:_telemetryBar];
+
+    CGFloat teleW = floor((panelW - 2 * actionMargin - 2 * actionGap) / 3.0);
+    _tokenBadge = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, teleW, 26)];
+    _tokenBadge.text = @"💎 0 Tok";
+    _tokenBadge.textAlignment = NSTextAlignmentCenter;
+    _tokenBadge.font = [UIFont monospacedDigitSystemFontOfSize:10 weight:UIFontWeightMedium];
+    _tokenBadge.textColor = [UIColor colorWithWhite:1 alpha:0.55];
+    _tokenBadge.backgroundColor = [UIColor colorWithWhite:1 alpha:0.06];
+    _tokenBadge.layer.cornerRadius = 7;
+    _tokenBadge.layer.borderWidth = 0.5;
+    _tokenBadge.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.08].CGColor;
+    _tokenBadge.layer.masksToBounds = YES;
+    [_telemetryBar addSubview:_tokenBadge];
+
+    _stepBadge = [[UILabel alloc] initWithFrame:CGRectMake(teleW + actionGap, 0, teleW, 26)];
+    _stepBadge.text = @"🎯 步数 0/100";
+    _stepBadge.textAlignment = NSTextAlignmentCenter;
+    _stepBadge.font = [UIFont monospacedDigitSystemFontOfSize:10 weight:UIFontWeightMedium];
+    _stepBadge.textColor = [UIColor colorWithWhite:1 alpha:0.55];
+    _stepBadge.backgroundColor = [UIColor colorWithWhite:1 alpha:0.06];
+    _stepBadge.layer.cornerRadius = 7;
+    _stepBadge.layer.borderWidth = 0.5;
+    _stepBadge.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.08].CGColor;
+    _stepBadge.layer.masksToBounds = YES;
+    [_telemetryBar addSubview:_stepBadge];
+
+    _timeBadge = [[UILabel alloc] initWithFrame:CGRectMake(2 * (teleW + actionGap), 0, teleW, 26)];
+    _timeBadge.text = @"⏱ 耗时 0.0s";
+    _timeBadge.textAlignment = NSTextAlignmentCenter;
+    _timeBadge.font = [UIFont monospacedDigitSystemFontOfSize:10 weight:UIFontWeightMedium];
+    _timeBadge.textColor = [UIColor colorWithWhite:1 alpha:0.55];
+    _timeBadge.backgroundColor = [UIColor colorWithWhite:1 alpha:0.06];
+    _timeBadge.layer.cornerRadius = 7;
+    _timeBadge.layer.borderWidth = 0.5;
+    _timeBadge.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.08].CGColor;
+    _timeBadge.layer.masksToBounds = YES;
+    [_telemetryBar addSubview:_timeBadge];
+
+    _tokenLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    _tokenLabel.hidden = YES;
     [_panel addSubview:_tokenLabel];
 
     // Scene-independent container.
@@ -832,6 +1005,19 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 
 #pragma mark - Voice Input
 
+- (void)onVoiceButtonClick {
+    if ([IOSDebAgent shared].isRunning) {
+        [self setStatus:@"正在执行任务，暂不可录音" color:[UIColor orangeColor]];
+        return;
+    }
+    if (_isVoiceInputting) {
+        [self stopVoiceInputWithCancel:NO];
+    } else {
+        [self startVoiceInput];
+        [self setStatus:@"🎙️ 正在聆听… 请说话，完成后再次点击停止" color:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1]];
+    }
+}
+
 - (void)onBarLongPress:(UILongPressGestureRecognizer *)g {
     if (g.state == UIGestureRecognizerStateBegan) {
         if ([IOSDebAgent shared].isRunning) return;
@@ -846,6 +1032,12 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 - (void)startVoiceInput {
     _isVoiceInputting = YES;
 
+    if (_voiceButton) {
+        [_voiceButton setTitle:@"🔴 停止" forState:UIControlStateNormal];
+        _voiceButton.backgroundColor = [UIColor colorWithRed:0.95 green:0.25 blue:0.25 alpha:0.25];
+        _voiceButton.layer.borderColor = [UIColor colorWithRed:0.95 green:0.25 blue:0.25 alpha:0.6].CGColor;
+    }
+
     // Set up recorder path
     NSString *docs = NSTemporaryDirectory();
     _voiceRecorderPath = [docs stringByAppendingPathComponent:@"voice_input.m4a"];
@@ -858,6 +1050,11 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     if (sessionError) {
         IOSDebLog(@"[voice] audio session error: %@", sessionError);
         _isVoiceInputting = NO;
+        if (_voiceButton) {
+            [_voiceButton setTitle:@"🎙 语音输入" forState:UIControlStateNormal];
+            _voiceButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+            _voiceButton.layer.borderColor = [UIColor colorWithRed:0.25 green:0.65 blue:1.0 alpha:0.35].CGColor;
+        }
         [self flashBarDenied];
         return;
     }
@@ -876,6 +1073,11 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     if (!_voiceRecorder || sessionError) {
         IOSDebLog(@"[voice] recorder init error: %@", sessionError);
         _isVoiceInputting = NO;
+        if (_voiceButton) {
+            [_voiceButton setTitle:@"🎙 语音输入" forState:UIControlStateNormal];
+            _voiceButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+            _voiceButton.layer.borderColor = [UIColor colorWithRed:0.25 green:0.65 blue:1.0 alpha:0.35].CGColor;
+        }
         [session setActive:NO withOptions:0 error:nil];
         [self flashBarDenied];
         return;
@@ -916,6 +1118,12 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 - (void)stopVoiceInputWithCancel:(BOOL)cancel {
     if (!_isVoiceInputting) return;
 
+    if (_voiceButton) {
+        [_voiceButton setTitle:@"🎙 语音输入" forState:UIControlStateNormal];
+        _voiceButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+        _voiceButton.layer.borderColor = [UIColor colorWithRed:0.25 green:0.65 blue:1.0 alpha:0.35].CGColor;
+    }
+
     [_voiceTimeoutTimer invalidate];
     _voiceTimeoutTimer = nil;
 
@@ -935,8 +1143,8 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 
     // Restore visual state
     [_bar.layer removeAnimationForKey:@"voicePulse"];
-    _bar.backgroundColor = [self panelBackground];
-    _barLabel.text = @"AI";
+    _bar.backgroundColor = [UIColor colorWithRed:0.045 green:0.065 blue:0.090 alpha:0.92];
+    _barLabel.text = @"Agent";
 
     if (cancel) {
         [self removeVoiceOverlay];
@@ -1066,9 +1274,16 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     [self makeKeyForInput];
 
     CGRect sup = _panel.superview.bounds;
-    CGFloat h = 300;
+    CGFloat h = kPanelHeight;
     _panel.frame = CGRectMake(12, sup.size.height - h - 12, sup.size.width - 24, h);
     [self updateTokenLabel];
+
+    _panel.transform = CGAffineTransformMakeScale(0.92, 0.92);
+    _panel.alpha = 0.0;
+    [UIView animateWithDuration:0.32 delay:0 usingSpringWithDamping:0.82 initialSpringVelocity:0.4 options:UIViewAnimationOptionCurveEaseOut animations:^{
+        self->_panel.transform = CGAffineTransformIdentity;
+        self->_panel.alpha = 1.0;
+    } completion:nil];
 }
 
 - (void)collapse {
@@ -1078,11 +1293,23 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     [_panel endEditing:YES];
     [_window endEditing:YES];
     _skillContainer.hidden = YES;
-    _panel.hidden = YES;
-    _bar.hidden = NO;
-    if ([IOSDebAgent shared].isRunning) {
-        [self setBarToRunningState];
-    }
+
+    [UIView animateWithDuration:0.20 animations:^{
+        self->_panel.transform = CGAffineTransformMakeScale(0.92, 0.92);
+        self->_panel.alpha = 0.0;
+    } completion:^(BOOL finished) {
+        self->_panel.hidden = YES;
+        self->_bar.hidden = NO;
+        self->_bar.transform = CGAffineTransformMakeScale(0.85, 0.85);
+        [UIView animateWithDuration:0.25 delay:0 usingSpringWithDamping:0.75 initialSpringVelocity:0.5 options:0 animations:^{
+            self->_bar.transform = CGAffineTransformIdentity;
+        } completion:nil];
+        if ([IOSDebAgent shared].isRunning) {
+            [self setBarToRunningState];
+        } else {
+            [self setBarToIdleState];
+        }
+    }];
 }
 
 - (void)onKeyboard:(NSNotification *)note {
@@ -1186,15 +1413,27 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         _barRevertTimer = nil;
     }
     [_bar.layer removeAnimationForKey:@"breathing"];
+    [_bar.layer removeAnimationForKey:@"voicePulse"];
     [_barLabel.layer removeAnimationForKey:@"breathing"];
-    _barLabel.layer.opacity = 1.0;
+    [_statusDot.layer removeAnimationForKey:@"dotPulse"];
 
-    _barLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
-    _barLabel.text = @"AI";
-    _barLabel.textColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1.0];
-    _bar.backgroundColor = [self panelBackground];
-    _bar.layer.borderColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.45].CGColor;
-    _bar.layer.borderWidth = 1.0;
+    _statusDot.backgroundColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1.0];
+    _barLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightBold];
+    _barLabel.text = @"Agent";
+    _barLabel.textColor = [UIColor whiteColor];
+    _barLabel.layer.opacity = 1.0;
+    _bar.backgroundColor = [UIColor colorWithRed:0.045 green:0.065 blue:0.090 alpha:0.92];
+    _bar.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.22].CGColor;
+    _bar.layer.borderWidth = 0.5;
+
+    CABasicAnimation *dotAnim = [CABasicAnimation animationWithKeyPath:@"opacity"];
+    dotAnim.fromValue = @(1.0);
+    dotAnim.toValue = @(0.35);
+    dotAnim.duration = 1.2;
+    dotAnim.autoreverses = YES;
+    dotAnim.repeatCount = HUGE_VALF;
+    dotAnim.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+    [_statusDot.layer addAnimation:dotAnim forKey:@"dotPulse"];
 }
 
 - (void)setBarToRunningState {
@@ -1202,38 +1441,41 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         [_barRevertTimer invalidate];
         _barRevertTimer = nil;
     }
-    if (_activeSkillTargetRounds > 0) {
-        _barLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightBold];
-        _barLabel.text = [NSString stringWithFormat:@"0/%ld", (long)_activeSkillTargetRounds];
-    } else {
-        _barLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
-        _barLabel.text = @"AI";
-    }
-    _barLabel.textColor = [UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1.0];
-    _bar.backgroundColor = [self panelBackground];
-    _bar.layer.borderColor = [UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:0.9].CGColor;
-    _bar.layer.borderWidth = 2.0;
-
     [_bar.layer removeAnimationForKey:@"breathing"];
     [_barLabel.layer removeAnimationForKey:@"breathing"];
+    [_statusDot.layer removeAnimationForKey:@"dotPulse"];
+    _barLabel.layer.opacity = 1.0;
+
+    _statusDot.backgroundColor = [UIColor colorWithRed:0.25 green:0.65 blue:1.0 alpha:1.0];
+    if (_activeSkillTargetRounds > 0) {
+        _barLabel.font = [UIFont monospacedDigitSystemFontOfSize:10 weight:UIFontWeightBold];
+        _barLabel.text = [NSString stringWithFormat:@"0/%ld", (long)_activeSkillTargetRounds];
+    } else {
+        _barLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightBold];
+        _barLabel.text = @"AI";
+    }
+    _barLabel.textColor = [UIColor colorWithRed:0.4 green:0.8 blue:1.0 alpha:1.0];
+    _bar.backgroundColor = [UIColor colorWithRed:0.045 green:0.065 blue:0.090 alpha:0.92];
+    _bar.layer.borderColor = [UIColor colorWithRed:0.25 green:0.65 blue:1.0 alpha:0.65].CGColor;
+    _bar.layer.borderWidth = 1.0;
 
     CABasicAnimation *borderAnim = [CABasicAnimation animationWithKeyPath:@"borderColor"];
-    borderAnim.fromValue = (id)[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1.0].CGColor;
-    borderAnim.toValue = (id)[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:0.20].CGColor;
-    borderAnim.duration = 0.85;
+    borderAnim.fromValue = (id)[UIColor colorWithRed:0.25 green:0.65 blue:1.0 alpha:0.8].CGColor;
+    borderAnim.toValue = (id)[UIColor colorWithRed:0.25 green:0.65 blue:1.0 alpha:0.2].CGColor;
+    borderAnim.duration = 0.75;
     borderAnim.autoreverses = YES;
     borderAnim.repeatCount = HUGE_VALF;
     borderAnim.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
     [_bar.layer addAnimation:borderAnim forKey:@"breathing"];
 
-    CABasicAnimation *glowAnim = [CABasicAnimation animationWithKeyPath:@"opacity"];
-    glowAnim.fromValue = @(1.0);
-    glowAnim.toValue = @(0.35);
-    glowAnim.duration = 0.85;
-    glowAnim.autoreverses = YES;
-    glowAnim.repeatCount = HUGE_VALF;
-    glowAnim.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
-    [_barLabel.layer addAnimation:glowAnim forKey:@"breathing"];
+    CABasicAnimation *dotAnim = [CABasicAnimation animationWithKeyPath:@"transform.scale"];
+    dotAnim.fromValue = @(0.85);
+    dotAnim.toValue = @(1.3);
+    dotAnim.duration = 0.55;
+    dotAnim.autoreverses = YES;
+    dotAnim.repeatCount = HUGE_VALF;
+    dotAnim.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+    [_statusDot.layer addAnimation:dotAnim forKey:@"dotPulse"];
 }
 
 - (void)setBarToCompletedState {
@@ -1243,14 +1485,16 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     }
     [_bar.layer removeAnimationForKey:@"breathing"];
     [_barLabel.layer removeAnimationForKey:@"breathing"];
+    [_statusDot.layer removeAnimationForKey:@"dotPulse"];
     _barLabel.layer.opacity = 1.0;
 
-    _barLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightBold];
+    _statusDot.backgroundColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1.0];
+    _barLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightBold];
     _barLabel.text = @"✓ 完成";
     _barLabel.textColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1.0];
-    _bar.backgroundColor = [UIColor colorWithRed:0.04 green:0.18 blue:0.10 alpha:0.95];
+    _bar.backgroundColor = [UIColor colorWithRed:0.03 green:0.14 blue:0.09 alpha:0.95];
     _bar.layer.borderColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.85].CGColor;
-    _bar.layer.borderWidth = 1.5;
+    _bar.layer.borderWidth = 1.0;
 
     if (@available(iOS 10.0, *)) {
         UINotificationFeedbackGenerator *gen = [[UINotificationFeedbackGenerator alloc] init];
@@ -1273,16 +1517,19 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     }
     [_bar.layer removeAnimationForKey:@"breathing"];
     [_barLabel.layer removeAnimationForKey:@"breathing"];
+    [_statusDot.layer removeAnimationForKey:@"dotPulse"];
     _barLabel.layer.opacity = 1.0;
 
     BOOL isStop = [message containsString:@"停止"] || [message containsString:@"stop"];
-    _barLabel.text = isStop ? @"! 停止" : @"! 异常";
-    UIColor *color = isStop ? [UIColor colorWithRed:1.0 green:0.55 blue:0.2 alpha:1.0]
+    UIColor *color = isStop ? [UIColor colorWithRed:1.0 green:0.6 blue:0.2 alpha:1.0]
                             : [UIColor colorWithRed:0.95 green:0.3 blue:0.3 alpha:1.0];
+    _statusDot.backgroundColor = color;
+    _barLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightBold];
+    _barLabel.text = isStop ? @"! 停止" : @"! 异常";
     _barLabel.textColor = color;
-    _bar.backgroundColor = [UIColor colorWithRed:0.20 green:0.08 blue:0.06 alpha:0.95];
+    _bar.backgroundColor = [UIColor colorWithRed:0.15 green:0.06 blue:0.05 alpha:0.95];
     _bar.layer.borderColor = color.CGColor;
-    _bar.layer.borderWidth = 1.5;
+    _bar.layer.borderWidth = 1.0;
 
     if (@available(iOS 10.0, *)) {
         UINotificationFeedbackGenerator *gen = [[UINotificationFeedbackGenerator alloc] init];
@@ -1310,14 +1557,30 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 - (void)setStatus:(NSString *)text color:(UIColor *)color {
     _statusLabel.text = text;
     _statusLabel.textColor = color;
-    _statusLabel.frame = CGRectMake(14, 174, _panel.bounds.size.width - 28, 16);
-    _table.frame = CGRectMake(0, 194, _panel.bounds.size.width - 24, 100);
+    _statusLabel.frame = CGRectMake(14, 172, _panel.bounds.size.width - 28, 16);
+    _table.frame = CGRectMake(0, 190, _panel.bounds.size.width - 24, 118);
 }
 
 - (void)updateTokenLabel {
     IOSDebAgent *a = [IOSDebAgent shared];
-    _tokenLabel.text = [NSString stringWithFormat:@"Token %ld · 上限 %ld 步",
-                        (long)a.tokenUsage, (long)a.stepLimit];
+    if (_tokenLabel) {
+        _tokenLabel.text = [NSString stringWithFormat:@"Token %ld · 上限 %ld 步",
+                            (long)a.tokenUsage, (long)a.stepLimit];
+    }
+    if (_tokenBadge) {
+        if (a.tokenUsage >= 1000) {
+            _tokenBadge.text = [NSString stringWithFormat:@"💎 %.1fk Tok", a.tokenUsage / 1000.0];
+        } else {
+            _tokenBadge.text = [NSString stringWithFormat:@"💎 %ld Tok", (long)a.tokenUsage];
+        }
+    }
+    if (_stepBadge) {
+        _stepBadge.text = [NSString stringWithFormat:@"🎯 步数 %ld/%ld", (long)a.currentStep, (long)a.stepLimit];
+    }
+    if (_timeBadge) {
+        NSTimeInterval elapsed = _taskStartTime ? -[_taskStartTime timeIntervalSinceNow] : 0;
+        _timeBadge.text = [NSString stringWithFormat:@"⏱ 耗时 %.1fs", elapsed];
+    }
 }
 
 #pragma mark - Agent events
@@ -1420,7 +1683,7 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 
 - (void)updateSkillLibButtonTitle {
     NSUInteger count = [[IOSDebSkillStore shared] allSkills].count;
-    [_skillLibButton setTitle:[NSString stringWithFormat:@"⚡ 技能库 (%lu)", (unsigned long)count]
+    [_skillLibButton setTitle:[NSString stringWithFormat:@"⚡ 技能 (%lu)", (unsigned long)count]
                      forState:UIControlStateNormal];
 }
 
@@ -1822,19 +2085,27 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         __weak typeof(self) weakSelf = self;
         rec.progressHandler = ^(NSString *status) {
             [weakSelf setStatus:status
-                          color:[UIColor colorWithRed:0.898 green:0.329 blue:0.294 alpha:1]];
+                          color:[UIColor colorWithRed:0.95 green:0.35 blue:0.35 alpha:1]];
         };
         [rec startRecording];
         _recording = YES;
-        [_recordButton setTitle:@"■ 完成" forState:UIControlStateNormal];
+        [_recordButton setTitle:@"■ 结束" forState:UIControlStateNormal];
+        _recordButton.backgroundColor = [UIColor colorWithRed:0.95 green:0.25 blue:0.25 alpha:0.85];
+        _recordButton.layer.borderColor = [UIColor colorWithRed:0.95 green:0.25 blue:0.25 alpha:0.85].CGColor;
+        _statusDot.backgroundColor = [UIColor colorWithRed:0.95 green:0.25 blue:0.25 alpha:1.0];
+        _barLabel.text = @"REC";
+        _barLabel.textColor = [UIColor colorWithRed:0.95 green:0.25 blue:0.25 alpha:1.0];
         [self collapse];
-        [self setStatus:@"录制中 · 正常操作，完成后点左上角「AI」再点「完成」"
-                  color:[UIColor colorWithRed:0.898 green:0.329 blue:0.294 alpha:1]];
+        [self setStatus:@"录制中 · 正常操作，完成后点击悬浮条再点「结束」"
+                  color:[UIColor colorWithRed:0.95 green:0.35 blue:0.35 alpha:1]];
         return;
     }
 
     _recording = NO;
-    [_recordButton setTitle:@"● 录制" forState:UIControlStateNormal];
+    [_recordButton setTitle:@"● 空间录制" forState:UIControlStateNormal];
+    _recordButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    _recordButton.layer.borderColor = [UIColor colorWithRed:0.95 green:0.35 blue:0.35 alpha:0.35].CGColor;
+    [self setBarToIdleState];
     [self setStatus:@"正在总结录制…" color:[UIColor colorWithRed:0.431 green:0.659 blue:1 alpha:1]];
 
     __weak typeof(self) weakSelf = self;
