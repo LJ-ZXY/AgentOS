@@ -7,6 +7,7 @@
 #import "IOSDebSkill.h"
 #import "IOSDebRecorder.h"
 #import "IOSDebLog.h"
+#import "IOSDebTranslator.h"
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 #import <AudioToolbox/AudioToolbox.h>
@@ -236,6 +237,7 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     UIView *_divider;
     UIButton *_skillLibButton;
     UIButton *_recordButton;
+    UIButton *_translateButton;
     UIButton *_voiceButton;
     UIView *_telemetryBar;
     UILabel *_tokenBadge;
@@ -354,12 +356,17 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onBarTap)];
     [_bar addGestureRecognizer:tap];
 
+    UITapGestureRecognizer *doubleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onBarDoubleTap)];
+    doubleTap.numberOfTapsRequired = 2;
+    [tap requireGestureRecognizerToFail:doubleTap];
+    [_bar addGestureRecognizer:doubleTap];
+
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(onBarPan:)];
     [_bar addGestureRecognizer:pan];
 
     UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(onBarLongPress:)];
-    longPress.minimumPressDuration = 0.3;
-    longPress.allowableMovement = CGFLOAT_MAX; // allow finger to stay anywhere
+    longPress.minimumPressDuration = 0.45;
+    longPress.allowableMovement = 12.0; // restrict movement so dragging cancels long press
     [_bar addGestureRecognizer:longPress];
 
     // Panel (hidden until expanded).
@@ -465,17 +472,17 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     [_stopButton addTarget:self action:@selector(onStop) forControlEvents:UIControlEventTouchUpInside];
     [_panel addSubview:_stopButton];
 
-    // Quick Action Clusters (3 pills: ⚡ 技能中心, ● 技能录制, 🎙 语音输入)
+    // Quick Action Clusters (4 pills: ⚡ 技能, ● 技能录制, 🌐 全屏翻译, 🎙 语音输入)
     CGFloat chipY = 76;
-    CGFloat actionMargin = 12.0;
-    CGFloat actionGap = 7.0;
-    CGFloat actionW = floor((panelW - 2 * actionMargin - 2 * actionGap) / 3.0);
+    CGFloat actionMargin = 10.0;
+    CGFloat actionGap = 6.0;
+    CGFloat actionW = floor((panelW - 2 * actionMargin - 3 * actionGap) / 4.0);
     CGFloat actionH = 27.0;
 
     _skillLibButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _skillLibButton.frame = CGRectMake(actionMargin, chipY, actionW, actionH);
-    [_skillLibButton setTitle:@"⚡ 技能中心" forState:UIControlStateNormal];
-    _skillLibButton.titleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+    [_skillLibButton setTitle:@"⚡ 技能" forState:UIControlStateNormal];
+    _skillLibButton.titleLabel.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightSemibold];
     [_skillLibButton setTitleColor:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1] forState:UIControlStateNormal];
     _skillLibButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
     _skillLibButton.layer.cornerRadius = 13.5;
@@ -487,7 +494,7 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     _recordButton = [UIButton buttonWithType:UIButtonTypeSystem];
     _recordButton.frame = CGRectMake(actionMargin + actionW + actionGap, chipY, actionW, actionH);
     [_recordButton setTitle:@"● 技能录制" forState:UIControlStateNormal];
-    _recordButton.titleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+    _recordButton.titleLabel.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightSemibold];
     [_recordButton setTitleColor:[UIColor colorWithRed:0.95 green:0.35 blue:0.35 alpha:1] forState:UIControlStateNormal];
     _recordButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
     _recordButton.layer.cornerRadius = 13.5;
@@ -496,10 +503,22 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     [_recordButton addTarget:self action:@selector(onRecord) forControlEvents:UIControlEventTouchUpInside];
     [_panel addSubview:_recordButton];
 
+    _translateButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _translateButton.frame = CGRectMake(actionMargin + 2 * (actionW + actionGap), chipY, actionW, actionH);
+    [_translateButton setTitle:@"🌐 全屏翻译" forState:UIControlStateNormal];
+    _translateButton.titleLabel.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightSemibold];
+    [_translateButton setTitleColor:[UIColor colorWithRed:0.25 green:0.85 blue:0.85 alpha:1] forState:UIControlStateNormal];
+    _translateButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    _translateButton.layer.cornerRadius = 13.5;
+    _translateButton.layer.borderWidth = 0.5;
+    _translateButton.layer.borderColor = [UIColor colorWithRed:0.25 green:0.85 blue:0.85 alpha:0.35].CGColor;
+    [_translateButton addTarget:self action:@selector(onTriggerFullScreenTranslation) forControlEvents:UIControlEventTouchUpInside];
+    [_panel addSubview:_translateButton];
+
     _voiceButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    _voiceButton.frame = CGRectMake(actionMargin + 2 * (actionW + actionGap), chipY, actionW, actionH);
+    _voiceButton.frame = CGRectMake(actionMargin + 3 * (actionW + actionGap), chipY, actionW, actionH);
     [_voiceButton setTitle:@"🎙 语音输入" forState:UIControlStateNormal];
-    _voiceButton.titleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+    _voiceButton.titleLabel.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightSemibold];
     [_voiceButton setTitleColor:[UIColor colorWithRed:0.25 green:0.65 blue:1.0 alpha:1] forState:UIControlStateNormal];
     _voiceButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
     _voiceButton.layer.cornerRadius = 13.5;
@@ -911,6 +930,7 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     }
     _window.hidden = NO;
     _window.userInteractionEnabled = YES;
+    [[IOSDebTranslator shared] attachToOverlayWindow:_window];
     [self updateTokenLabel];
     IOSDebLog(@"[panel] attached at level %.0f first=%d", (double)_window.windowLevel, (int)firstAttach);
     [self reloadSkillChips];
@@ -972,13 +992,34 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     if (_expanded) [self collapse]; else [self expand];
 }
 
+- (void)onBarDoubleTap {
+    if (_dragging) return;
+    if ([[IOSDebTranslator shared] isOverlayVisible]) {
+        [[IOSDebTranslator shared] dismissOverlayAnimated:YES];
+    } else {
+        [self onTriggerFullScreenTranslation];
+    }
+}
+
+- (void)onTriggerFullScreenTranslation {
+    [self collapse];
+    [[IOSDebTranslator shared] translateCurrentScreenWithCompletion:^(BOOL ok, NSInteger count, NSString *error) {
+        if (!ok && error) {
+            [self setStatus:error color:[UIColor orangeColor]];
+        }
+    }];
+}
+
 - (void)onBarPan:(UIPanGestureRecognizer *)g {
-    if (_isVoiceInputting) return;
-    CGPoint t = [g translationInView:_bar.superview];
     if (g.state == UIGestureRecognizerStateBegan) {
+        if (_isVoiceInputting) {
+            [self stopVoiceInputWithCancel:YES];
+        }
         _dragging = NO;
         _barOrigin = _bar.frame.origin;
     }
+    if (_isVoiceInputting) return;
+    CGPoint t = [g translationInView:_bar.superview];
     if (g.state == UIGestureRecognizerStateChanged) {
         if (fabs(t.x) > 4 || fabs(t.y) > 4) _dragging = YES;
         CGPoint p = CGPointMake(_barOrigin.x + t.x, _barOrigin.y + t.y);
@@ -1016,22 +1057,30 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         [self stopVoiceInputWithCancel:NO];
     } else {
         [self startVoiceInput];
-        [self setStatus:@"🎙️ 正在聆听… 请说话，完成后再次点击停止" color:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1]];
     }
 }
 
 - (void)onBarLongPress:(UILongPressGestureRecognizer *)g {
     if (g.state == UIGestureRecognizerStateBegan) {
-        if ([IOSDebAgent shared].isRunning) return;
+        if ([IOSDebAgent shared].isRunning || _dragging) return;
         [self startVoiceInput];
     } else if (g.state == UIGestureRecognizerStateEnded) {
-        [self stopVoiceInputWithCancel:NO];
+        if (_isVoiceInputting) {
+            [self stopVoiceInputWithCancel:NO];
+        }
     } else if (g.state == UIGestureRecognizerStateCancelled || g.state == UIGestureRecognizerStateFailed) {
-        [self stopVoiceInputWithCancel:YES];
+        if (_isVoiceInputting) {
+            [self stopVoiceInputWithCancel:YES];
+        }
     }
 }
 
 - (void)startVoiceInput {
+    if ([IOSDebAgent shared].isRunning) {
+        [self setStatus:@"正在执行任务，暂不可录音" color:[UIColor orangeColor]];
+        return;
+    }
+
     _isVoiceInputting = YES;
 
     if (_voiceButton) {
@@ -1047,10 +1096,19 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     // Configure audio session for recording
     NSError *sessionError = nil;
     AVAudioSession *session = [AVAudioSession sharedInstance];
-    [session setCategory:AVAudioSessionCategoryPlayAndRecord mode:AVAudioSessionModeSpokenAudio
-                  options:AVAudioSessionCategoryOptionDuckOthers error:&sessionError];
+    AVAudioSessionCategoryOptions options = AVAudioSessionCategoryOptionDefaultToSpeaker |
+                                           AVAudioSessionCategoryOptionDuckOthers |
+                                           AVAudioSessionCategoryOptionAllowBluetooth;
+    [session setCategory:AVAudioSessionCategoryPlayAndRecord
+                    mode:AVAudioSessionModeDefault
+                 options:options
+                   error:&sessionError];
     if (sessionError) {
-        IOSDebLog(@"[voice] audio session error: %@", sessionError);
+        IOSDebLog(@"[voice] audio session category error: %@", sessionError);
+    }
+    [session setActive:YES withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:&sessionError];
+    if (sessionError) {
+        IOSDebLog(@"[voice] audio session setActive error: %@", sessionError);
         _isVoiceInputting = NO;
         if (_voiceButton) {
             [_voiceButton setTitle:@"🎙 语音输入" forState:UIControlStateNormal];
@@ -1060,14 +1118,14 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         [self flashBarDenied];
         return;
     }
-    [session setActive:YES withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:&sessionError];
 
-    // Configure recorder settings (AAC, 44.1kHz, mono)
+    // Configure recorder settings (AAC in M4A, 16kHz mono is optimal for Gemini/ASR)
     NSDictionary *settings = @{
         AVFormatIDKey: @(kAudioFormatMPEG4AAC),
-        AVSampleRateKey: @44100.0,
+        AVSampleRateKey: @16000.0,
         AVNumberOfChannelsKey: @1,
-        AVEncoderAudioQualityKey: @(AVAudioQualityMedium)
+        AVEncoderAudioQualityKey: @(AVAudioQualityHigh),
+        AVEncoderBitRateKey: @32000
     };
 
     _voiceRecorder = [[AVAudioRecorder alloc] initWithURL:[NSURL fileURLWithPath:_voiceRecorderPath]
@@ -1104,11 +1162,14 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     [self createVoiceOverlay];
     _voiceLabel.text = @"正在聆听…";
 
+    if (_expanded) {
+        [self setStatus:@"🎙️ 正在聆听… 请说话，完成后再次点击停止" color:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1]];
+    }
+
     // Timeout timer
-    __weak typeof(self) ws = self;
+    [_voiceTimeoutTimer invalidate];
     _voiceTimeoutTimer = [NSTimer scheduledTimerWithTimeInterval:30.0 target:self
         selector:@selector(onVoiceTimeout) userInfo:nil repeats:NO];
-    (void)ws;
 }
 
 - (void)onVoiceTimeout {
@@ -1151,8 +1212,10 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     if (cancel) {
         [self removeVoiceOverlay];
         _isVoiceInputting = NO;
-        // Clean up recording file
         [[NSFileManager defaultManager] removeItemAtPath:_voiceRecorderPath error:nil];
+        if (_expanded) {
+            [self setStatus:@"已取消录音" color:[UIColor grayColor]];
+        }
         return;
     }
 
@@ -1163,20 +1226,35 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         return;
     }
 
-    // Show "识别中…" and transcribe
+    NSData *audioData = [NSData dataWithContentsOfFile:_voiceRecorderPath];
+    [[NSFileManager defaultManager] removeItemAtPath:_voiceRecorderPath error:nil];
+
+    if (!audioData || audioData.length < 2000) {
+        IOSDebLog(@"[voice] recording too short (%lu bytes), ignoring", (unsigned long)audioData.length);
+        [self removeVoiceOverlay];
+        _isVoiceInputting = NO;
+        [self flashBarDenied];
+        if (_expanded) {
+            [self setStatus:@"录音时间过短，请说话后再停止" color:[UIColor orangeColor]];
+        } else {
+            [self createVoiceOverlay];
+            _voiceLabel.text = @"录音时间过短";
+            [self resizeVoiceOverlay];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                [self removeVoiceOverlay];
+            });
+        }
+        return;
+    }
+
+    // Show "识别中…"
     if (_voiceLabel) {
         _voiceLabel.text = @"识别中…";
         [self resizeVoiceOverlay];
     }
-
-    NSData *audioData = [NSData dataWithContentsOfFile:_voiceRecorderPath];
-    [[NSFileManager defaultManager] removeItemAtPath:_voiceRecorderPath error:nil];
-
-    if (!audioData || audioData.length == 0) {
-        [self removeVoiceOverlay];
-        _isVoiceInputting = NO;
-        [self flashBarDenied];
-        return;
+    if (_expanded) {
+        [self setStatus:@"⏳ 正在识别语音，请稍候…" color:[UIColor colorWithRed:0.2 green:0.7 blue:1.0 alpha:1]];
     }
 
     IOSDebLog(@"[voice] recording complete, %lu bytes, sending to LLM", (unsigned long)audioData.length);
@@ -1189,22 +1267,28 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         s->_isVoiceInputting = NO;
 
         if (error || !text.length) {
-            IOSDebLog(@"[voice] transcribe error: %@", error ?: @"empty");
+            NSString *errDesc = error.length ? error : @"未识别到有效语音";
+            IOSDebLog(@"[voice] transcribe error: %@", errDesc);
             [s flashBarDenied];
-            // Show error briefly
-            [s createVoiceOverlay];
-            s->_voiceLabel.text = error.length ? error : @"识别失败";
-            [s resizeVoiceOverlay];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
-                          dispatch_get_main_queue(), ^{
-                [s removeVoiceOverlay];
-            });
+            if (s->_expanded) {
+                [s setStatus:[NSString stringWithFormat:@"❌ %@", errDesc] color:[UIColor orangeColor]];
+            } else {
+                [s createVoiceOverlay];
+                s->_voiceLabel.text = errDesc;
+                [s resizeVoiceOverlay];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                              dispatch_get_main_queue(), ^{
+                    [s removeVoiceOverlay];
+                });
+            }
             return;
         }
 
         IOSDebLog(@"[voice] transcribed: %@", text.length > 60 ? [text substringToIndex:60] : text);
         s->_input.text = text;
         s->_counter.text = [NSString stringWithFormat:@"%lu / 500", (unsigned long)text.length];
+        [s setStatus:[NSString stringWithFormat:@"✅ 识别成功 (%lu字)", (unsigned long)text.length]
+               color:[UIColor colorWithRed:0.3 green:0.85 blue:0.4 alpha:1]];
         [s expand];
         [s makeKeyForInput];
     }];
@@ -1213,23 +1297,38 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 - (void)createVoiceOverlay {
     if (_voiceOverlay) [self removeVoiceOverlay];
 
+    CGRect supBounds = _bar.superview.bounds;
     CGFloat barX = _bar.frame.origin.x;
     CGFloat barY = _bar.frame.origin.y;
     CGFloat barH = _bar.bounds.size.height;
 
-    _voiceOverlay = [[UIView alloc] initWithFrame:CGRectMake(barX, barY + barH + 6, 200, 36)];
+    CGFloat overlayW = 200;
+    CGFloat overlayH = 36;
+    CGFloat overlayX = barX;
+    if (overlayX + overlayW > supBounds.size.width - 12) {
+        overlayX = supBounds.size.width - overlayW - 12;
+    }
+    if (overlayX < 12) overlayX = 12;
+
+    CGFloat overlayY = barY + barH + 6;
+    if (overlayY + overlayH > supBounds.size.height - 40) {
+        overlayY = barY - overlayH - 6;
+    }
+
+    _voiceOverlay = [[UIView alloc] initWithFrame:CGRectMake(overlayX, overlayY, overlayW, overlayH)];
     _voiceOverlay.backgroundColor = [UIColor colorWithRed:0.055 green:0.075 blue:0.098 alpha:0.92];
     _voiceOverlay.layer.cornerRadius = 12;
     _voiceOverlay.layer.borderWidth = 1;
     _voiceOverlay.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
     _voiceOverlay.clipsToBounds = YES;
 
-    _voiceLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 4, 184, 28)];
+    _voiceLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 4, overlayW - 16, overlayH - 8)];
     _voiceLabel.font = [UIFont systemFontOfSize:12];
     _voiceLabel.textColor = [UIColor whiteColor];
     _voiceLabel.numberOfLines = 2;
     _voiceLabel.adjustsFontSizeToFitWidth = YES;
     _voiceLabel.minimumScaleFactor = 0.7;
+    _voiceLabel.textAlignment = NSTextAlignmentCenter;
     [_voiceOverlay addSubview:_voiceLabel];
 
     [_bar.superview addSubview:_voiceOverlay];
@@ -1237,13 +1336,18 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 
 - (void)resizeVoiceOverlay {
     if (!_voiceOverlay || !_voiceLabel) return;
-    CGSize textSize = [_voiceLabel.text boundingRectWithSize:CGSizeMake(184, CGFLOAT_MAX)
+    CGRect supBounds = _bar.superview.bounds;
+    CGSize textSize = [_voiceLabel.text boundingRectWithSize:CGSizeMake(240, CGFLOAT_MAX)
         options:NSStringDrawingUsesLineFragmentOrigin
         attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:12]}
         context:nil].size;
-    CGFloat w = MIN(200, MAX(120, textSize.width + 24));
+    CGFloat w = MIN(supBounds.size.width - 24, MAX(120, textSize.width + 24));
     CGFloat h = MAX(36, textSize.height + 12);
-    _voiceOverlay.frame = CGRectMake(_voiceOverlay.frame.origin.x, _voiceOverlay.frame.origin.y, w, h);
+    CGFloat x = _voiceOverlay.frame.origin.x;
+    if (x + w > supBounds.size.width - 12) {
+        x = supBounds.size.width - w - 12;
+    }
+    _voiceOverlay.frame = CGRectMake(x, _voiceOverlay.frame.origin.y, w, h);
     _voiceLabel.frame = CGRectMake(8, (h - textSize.height) / 2.0, w - 16, textSize.height);
 }
 
@@ -1374,6 +1478,19 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
             [gen prepare];
             [gen notificationOccurred:UINotificationFeedbackTypeSuccess];
         }
+        return;
+    }
+
+    NSString *lower = text.lowercaseString;
+    if ([lower isEqualToString:@"全屏翻译"] || [lower isEqualToString:@"翻译屏幕"] ||
+        [lower isEqualToString:@"翻译当前界面"] || [lower isEqualToString:@"翻译"] ||
+        [lower isEqualToString:@"屏幕翻译"] || [lower isEqualToString:@"translate"] ||
+        [lower isEqualToString:@"translate screen"]) {
+        _input.text = @"";
+        _counter.text = @"0 / 500";
+        [_input resignFirstResponder];
+        [_panel endEditing:YES];
+        [self onTriggerFullScreenTranslation];
         return;
     }
 

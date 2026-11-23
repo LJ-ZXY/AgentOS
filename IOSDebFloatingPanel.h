@@ -27,6 +27,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)expand;
 - (void)collapse;
 - (void)onCheckUpdate;
+- (void)onTriggerFullScreenTranslation;
 
 @end
 

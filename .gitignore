@@ -1,0 +1,42 @@
+/.DS_Store
+
+# Theos build artifacts
+/.theos/
+/packages/
+
+# IDE and local workspace files
+/.idea/
+/.vscode/
+/*.swp
+/*.swo
+*~
+
+# Local logs and temp artifacts
+*.log
+*.tmp
+*.temp
+/release
+.DS_Store
+
+
+*.o
+AppSync/.theos/*
+.theos-rootless/*
+debs/*
+*.deb
+*.dylib
+**/.theos/*
+**/.theos-rootless/*
+*/.theos/*
+*/.theos-rootless/*
+*.sublime-workspace
+_/*
+*/obj/*
+**/obj/*
+.claude
+.codex/
+
+# Rebuilt, SHA256-verified PaddleOCR dependencies (sources/lockfiles remain tracked).
+/third_party/paddleocr/runtime/
+/third_party/paddleocr/models/*.onnx
+__pycache__/

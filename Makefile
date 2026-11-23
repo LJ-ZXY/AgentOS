@@ -27,7 +27,8 @@ ios-deb_FILES = Tweak.x \
                 IOSDebLexicon.m \
                 IOSDebQuizState.m \
                 IOSDebFloatingPanel.m \
-                IOSDebUpdater.m
+                IOSDebUpdater.m \
+                IOSDebTranslator.m
 
 ios-deb_CFLAGS = -fobjc-arc -Wno-unused-function -Wno-deprecated-declarations
 ios-deb_FRAMEWORKS = UIKit Foundation CoreGraphics QuartzCore AudioToolbox AVFoundation

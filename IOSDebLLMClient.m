@@ -293,14 +293,16 @@ NSString *const IOSDebLLMErrorDomain = @"com.witchan.ios-deb.llm";
         @"contents": @[@{
             @"role": @"user",
             @"parts": @[
-                @{@"text": @"请将这段中文语音转录为文字，只输出转录结果，不要加任何解释或标点符号以外的内容"},
+                @{@"text": @"你是一个精准的语音识别（ASR）引擎。请直接输出音频中的语音文字内容，不要输出任何思考过程，不要包含任何前缀、解释、说明或多余的标点。若没有清晰人声，请直接输出空内容。"},
                 @{@"inline_data": @{
-                    @"mime_type": @"audio/aac",
+                    @"mime_type": @"audio/m4a",
                     @"data": b64
                 }}
             ]
         }],
-        @"generationConfig": @{@"temperature": @0.1}
+        @"generationConfig": @{
+            @"temperature": @0.0
+        }
     };
 
     NSData *bodyData = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
@@ -382,14 +384,34 @@ NSString *const IOSDebLLMErrorDomain = @"com.witchan.ios-deb.llm";
 
         NSMutableString *result = [NSMutableString string];
         for (NSDictionary *part in parts) {
+            // Skip thinking tokens for Gemini 2.0 / 3.0
+            if ([part[@"thought"] boolValue]) {
+                continue;
+            }
             NSString *t = part[@"text"];
             if ([t isKindOfClass:[NSString class]]) [result appendString:t];
         }
 
-        NSString *cleaned = [result stringByTrimmingCharactersInSet:
+        // Strip <thought>...</thought> if embedded in text
+        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"<thought>[\\s\\S]*?<\\/thought>" options:NSRegularExpressionCaseInsensitive error:nil];
+        NSString *cleaned = [regex stringByReplacingMatchesInString:result options:0 range:NSMakeRange(0, result.length) withTemplate:@""];
+        cleaned = [cleaned stringByTrimmingCharactersInSet:
                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+        // Filter out typical LLM responses when silence/ambient noise was recorded
+        NSArray *noisePhrases = @[
+            @"未检测到语音", @"未检测到声音", @"没有听到语音", @"没有检测到有效语音",
+            @"请提供需要转录", @"无法识别语音", @"无法转录", @"没有说话声", @"音频中无声音"
+        ];
+        for (NSString *phrase in noisePhrases) {
+            if ([cleaned containsString:phrase] && cleaned.length < 35) {
+                cleaned = @"";
+                break;
+            }
+        }
+
         if (cleaned.length == 0) {
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, @"转录结果为空"); });
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(nil, @"未检测到清晰人声，请重试"); });
             return;
         }
 
