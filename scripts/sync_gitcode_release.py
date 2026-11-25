@@ -48,18 +48,38 @@ def download_file(url, dest_path, headers=None, timeout=180):
             out.write(chunk)
 
 
-def put_binary_file(url, file_path, headers, timeout=300):
-    file_size = os.path.getsize(file_path)
-    req_headers = dict(headers or {})
-    req_headers.setdefault("Content-Length", str(file_size))
-    with open(file_path, "rb") as fp:
-        data = fp.read()
-    req = urllib.request.Request(url, data=data, headers=req_headers, method="PUT")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status, resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.read().decode("utf-8", errors="replace")
+def put_binary_file(url, file_path, headers, timeout=600):
+    """Stream-upload a release attachment via curl HTTP/1.1 PUT without Expect: 100-continue stalls."""
+    cmd = [
+        "curl",
+        "-sS",
+        "--fail-with-body",
+        "--http1.1",
+        "--retry", "3",
+        "--retry-delay", "2",
+        "-m", str(timeout),
+        "-X", "PUT",
+        "-H", "Expect:",
+        "-w", "\nHTTP_STATUS:%{http_code}",
+    ]
+    for k, v in (headers or {}).items():
+        cmd.extend(["-H", f"{k}: {v}"])
+    cmd.extend(["-T", str(file_path), url])
+
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    stdout = res.stdout or ""
+    status = 0
+    body = stdout
+    if "HTTP_STATUS:" in stdout:
+        body_part, status_part = stdout.rsplit("HTTP_STATUS:", 1)
+        body = body_part.strip()
+        try:
+            status = int(status_part.strip())
+        except ValueError:
+            status = 0
+    if res.returncode != 0 and status == 0:
+        raise RuntimeError(f"curl PUT failed (rc={res.returncode}): {res.stderr.strip()} {body}")
+    return status, body
 
 
 def push_git_refs_to_gitcode(tag_name, token):
