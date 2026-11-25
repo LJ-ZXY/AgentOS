@@ -48,14 +48,17 @@ def download_file(url, dest_path, headers=None, timeout=180):
             out.write(chunk)
 
 
-def put_binary_file(url, file_path, headers, timeout=600):
-    """Stream-upload a release attachment via curl HTTP/1.1 PUT without Expect: 100-continue stalls."""
+def put_binary_file(url, file_path, headers, timeout=300):
+    """Stream-upload a release attachment via curl HTTP/1.1 PUT with fast stall detection."""
     cmd = [
         "curl",
         "-sS",
         "--fail-with-body",
         "--http1.1",
-        "--retry", "3",
+        "--connect-timeout", "20",
+        "--speed-limit", "5120",
+        "--speed-time", "30",
+        "--retry", "2",
         "--retry-delay", "2",
         "-m", str(timeout),
         "-X", "PUT",
@@ -158,10 +161,10 @@ def sync_release(gh_release, gc_token):
         print(f"Created GitCode release {tag_name}")
         existing = res
 
-    # Re-fetch release to obtain existing attachment IDs
+    # Re-fetch release to obtain existing attachment info
     _, existing = http_json(tag_url)
     existing_assets = {
-        a.get("name"): a.get("id")
+        a.get("name"): a
         for a in (existing.get("assets") or [])
         if a.get("name") and a.get("id")
     }
@@ -180,16 +183,14 @@ def sync_release(gh_release, gc_token):
         for asset in gh_assets:
             fname = asset["name"]
             dl_url = asset["browser_download_url"]
+            old_asset = existing_assets.get(fname)
+            if old_asset and old_asset.get("size") == asset.get("size") and os.environ.get("FORCE_UPLOAD") != "1":
+                print(f"Skipping {fname}: already synced with identical size ({asset.get('size')} bytes).")
+                continue
+
             local_file = Path(tmpdir) / fname
             print(f"Downloading {fname} from GitHub...")
             download_file(dl_url, local_file, headers=dl_headers)
-
-            # Delete old attachment with same name if present
-            old_id = existing_assets.get(fname)
-            if old_id:
-                del_url = f"{GITCODE_API_BASE}/repos/{owner_enc}/{repo_enc}/releases/{tag_enc}/attach_files/{old_id}?{tok_q}"
-                d_status, d_res = http_json(del_url, method="DELETE")
-                print(f"Deleted old attachment {fname} (id={old_id}): HTTP {d_status}")
 
             up_q = urllib.parse.urlencode({"access_token": gc_token, "file_name": fname})
             up_info_url = f"{GITCODE_API_BASE}/repos/{owner_enc}/{repo_enc}/releases/{tag_enc}/upload_url?{up_q}"
@@ -201,6 +202,13 @@ def sync_release(gh_release, gc_token):
             if put_status not in (200, 201, 204):
                 raise RuntimeError(f"PUT upload failed for {fname}: HTTP {put_status} {put_body}")
             print(f"Uploaded {fname} ({os.path.getsize(local_file)} bytes) to GitCode release {tag_name}")
+
+            # Delete superseded attachment only AFTER the new upload succeeds
+            old_id = old_asset.get("id") if old_asset else None
+            if old_id:
+                del_url = f"{GITCODE_API_BASE}/repos/{owner_enc}/{repo_enc}/releases/{tag_enc}/attach_files/{old_id}?{tok_q}"
+                d_status, _ = http_json(del_url, method="DELETE")
+                print(f"Cleaned up previous attachment {fname} (id={old_id}): HTTP {d_status}")
 
 
 def main():
