@@ -266,7 +266,7 @@ static NSSet<NSString *> *IOSDebStopwords(void) {
             [intersection intersectSet:mChars];
             NSUInteger overlap = intersection.count;
             if (overlap >= 2) {
-                best = MAX(best, 0.76 + MIN(overlap * 0.05, 0.16));
+                best = MAX(best, 0.75 + MIN((double)(overlap - 2) * 0.03, 0.09));
             }
         }
     }
@@ -327,9 +327,19 @@ static NSString *IOSDebQuizTrim(NSString *text) {
         NSDictionary *r = el[@"rect"];
         if (text.length && [r isKindOfClass:NSDictionary.class]) {
             for (NSDictionary *descriptor in descriptors) {
-                if (![text isEqual:IOSDebQuizTrim(descriptor[@"text"])]) continue;
                 NSDictionary *d = descriptor[@"rect"];
                 if (![d isKindOfClass:NSDictionary.class]) continue;
+                if ([descriptor[@"boundsOnly"] boolValue]) {
+                    double cx = [r[@"x"] doubleValue] + [r[@"width"] doubleValue] / 2.0;
+                    double cy = [r[@"y"] doubleValue] + [r[@"height"] doubleValue] / 2.0;
+                    CGRect box = CGRectInset(CGRectMake([d[@"x"] doubleValue], [d[@"y"] doubleValue],
+                                                        [d[@"width"] doubleValue], [d[@"height"] doubleValue]), -4.0, -4.0);
+                    if (CGRectContainsPoint(box, CGPointMake(cx, cy))) {
+                        own = YES; break;
+                    }
+                    continue;
+                }
+                if (![text isEqual:IOSDebQuizTrim(descriptor[@"text"])]) continue;
                 double x = [r[@"x"] doubleValue], y = [r[@"y"] doubleValue];
                 double dx = [d[@"x"] doubleValue], dy = [d[@"y"] doubleValue];
                 if (fabs(x-dx) <= 2 && fabs(y-dy) <= 2 &&

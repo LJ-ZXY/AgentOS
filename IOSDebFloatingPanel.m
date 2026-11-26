@@ -15,9 +15,160 @@
 
 static CGFloat const kBarHeight = 36.0;
 static CGFloat const kBarWidth = 68.0;
-static CGFloat const kPanelHeight = 260.0;
+static CGFloat const kCompactPanelHeight = 162.0;
+static CGFloat const kSkillPanelHeight = 276.0;
+static CGFloat const kLogMaxPanelHeight = 450.0;
 static NSString *const kPosXKey = @"ui.barX";
 static NSString *const kPosYKey = @"ui.barY";
+
+static UIColor *IOSDebAccentMint(void) {
+    return [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1.0];
+}
+
+static UIColor *IOSDebAccentSky(void) {
+    return [UIColor colorWithRed:0.30 green:0.75 blue:1.0 alpha:1.0];
+}
+
+static UIButton *IOSDebMakeDrawerButton(NSString *title, UIColor *color, UIColor *bgColor, CGFloat fontSize) {
+    UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+    [btn setTitle:title forState:UIControlStateNormal];
+    btn.titleLabel.font = [UIFont systemFontOfSize:fontSize weight:UIFontWeightSemibold];
+    [btn setTitleColor:color forState:UIControlStateNormal];
+    btn.backgroundColor = bgColor ?: [UIColor colorWithWhite:1 alpha:0.08];
+    btn.layer.cornerRadius = 8;
+    btn.layer.borderWidth = 0.5;
+    btn.layer.borderColor = [color colorWithAlphaComponent:0.32].CGColor;
+    btn.contentEdgeInsets = UIEdgeInsetsMake(0, 7, 0, 7);
+    return btn;
+}
+
+static NSString *IOSDebFormatRawLogEvent(NSString *shortTime, NSDictionary *ev, BOOL *outAbnormal) {
+    NSString *event = [ev[@"event"] isKindOfClass:NSString.class] ? ev[@"event"] : @"";
+    if ([event isEqualToString:@"poll"]) {
+        NSString *fb = [ev[@"feedback"] isKindOfClass:NSString.class] ? ev[@"feedback"] : @"";
+        if (fb.length == 0) return nil;
+        if ([fb containsString:@"错"] || [fb containsString:@"异常"]) *outAbnormal = YES;
+        return [NSString stringWithFormat:@"%@ [反馈] %@", shortTime, fb];
+    }
+    if ([event isEqualToString:@"question"] || [event isEqualToString:@"round_complete"] || [event isEqualToString:@"tap_after"]) {
+        return nil;
+    }
+    if ([event isEqualToString:@"local_decision"]) {
+        NSString *reason = ev[@"reason"] ?: @"";
+        NSString *word = ev[@"word"] ?: @"";
+        NSDictionary *dec = [ev[@"decision"] isKindOfClass:NSDictionary.class] ? ev[@"decision"] : nil;
+        if ([reason isEqualToString:@"本地命中"]) {
+            return [NSString stringWithFormat:@"%@ [⚡直切] %@ -> %@", shortTime, word, dec[@"winner"] ?: @""];
+        }
+        *outAbnormal = YES;
+        NSMutableArray *opts = [NSMutableArray array];
+        for (NSDictionary *s in dec[@"scores"]) {
+            if ([s isKindOfClass:NSDictionary.class] && s[@"option"]) [opts addObject:s[@"option"]];
+        }
+        return [NSString stringWithFormat:@"%@ [⚠️%@] %@ (%@)", shortTime, reason, word, [opts componentsJoinedByString:@"/"]];
+    }
+    if ([event isEqualToString:@"cloud_request"]) {
+        *outAbnormal = YES;
+        return [NSString stringWithFormat:@"%@ [☁️云端#%@] %@ (%@)", shortTime, ev[@"sequence"] ?: @"", ev[@"word"] ?: @"", ev[@"reason"] ?: @""];
+    }
+    if ([event isEqualToString:@"cloud_response"]) {
+        NSString *err = [ev[@"error"] isKindOfClass:NSString.class] ? ev[@"error"] : @"";
+        if (err.length > 0) {
+            *outAbnormal = YES;
+            return [NSString stringWithFormat:@"%@ [❌云端#%@] %@", shortTime, ev[@"sequence"] ?: @"", err];
+        }
+        return [NSString stringWithFormat:@"%@ [☁️响应#%@] %.1fs", shortTime, ev[@"sequence"] ?: @"", [ev[@"duration"] doubleValue]];
+    }
+    if ([event isEqualToString:@"tap_before"]) {
+        return [NSString stringWithFormat:@"%@ [点击] %@", shortTime, ev[@"target"] ?: @""];
+    }
+    if ([event isEqualToString:@"quiz_unrecognised"]) {
+        *outAbnormal = YES;
+        return [NSString stringWithFormat:@"%@ [❌未识别] miss=%@ %@", shortTime, ev[@"missCount"] ?: @0, ev[@"reason"] ?: @""];
+    }
+    if ([event isEqualToString:@"entry_recovery"]) {
+        return [NSString stringWithFormat:@"%@ [恢复] %@", shortTime, ev[@"feedback"] ?: @""];
+    }
+    if ([event isEqualToString:@"run_start"]) {
+        return [NSString stringWithFormat:@"%@ [▶ 开始运行]", shortTime];
+    }
+    if ([event isEqualToString:@"run_end"]) {
+        NSString *r = ev[@"reason"] ?: @"结束";
+        if ([r containsString:@"停止"] || [r containsString:@"异常"] || [r containsString:@"上限"] || [r containsString:@"死循环"]) {
+            *outAbnormal = YES;
+        }
+        return [NSString stringWithFormat:@"%@ [■ 结束] %@ (本地:%@ 云端:%@)", shortTime, r, ev[@"localCount"] ?: @0, ev[@"cloudCount"] ?: @0];
+    }
+    return [NSString stringWithFormat:@"%@ [%@] %@", shortTime, event, ev[@"reason"] ?: ev[@"word"] ?: @""];
+}
+
+static NSDictionary *IOSDebReadAndFormatLogTail(NSString *path, BOOL onlyAbnormal, NSString *keyword) {
+    NSFileHandle *fh = path.length ? [NSFileHandle fileHandleForReadingAtPath:path] : nil;
+    if (!fh) {
+        return @{@"text": @"", @"shown": @0, @"total": @0, @"kb": @0};
+    }
+    unsigned long long fileSize = [[[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil][NSFileSize] unsignedLongLongValue];
+    static const unsigned long long kTailBytes = 96ULL * 1024;
+    if (fileSize > kTailBytes) {
+        [fh seekToFileOffset:fileSize - kTailBytes];
+    }
+    NSData *data = [fh readDataToEndOfFile];
+    [fh closeFile];
+
+    NSString *raw = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+    NSArray<NSString *> *lines = [raw componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    // If we sought mid-line, drop the first possibly truncated fragment.
+    NSUInteger startIdx = (fileSize > kTailBytes && lines.count > 1) ? 1 : 0;
+
+    NSMutableArray<NSString *> *formatted = [NSMutableArray array];
+    NSUInteger totalEvents = 0;
+    NSString *kw = [keyword stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+    for (NSUInteger i = startIdx; i < lines.count; i++) {
+        NSString *line = [lines[i] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (line.length == 0) continue;
+
+        NSString *shortTime = @"";
+        NSString *body = line;
+        if (line.length >= 24 && [line characterAtIndex:10] == ' ' && [line characterAtIndex:23] == ' ') {
+            shortTime = [line substringWithRange:NSMakeRange(11, 8)];
+            body = [line substringFromIndex:24];
+        }
+
+        BOOL abnormal = NO;
+        NSString *displayLine = nil;
+        if ([body hasPrefix:@"{"]) {
+            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:[body dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+            if ([json isKindOfClass:NSDictionary.class]) {
+                displayLine = IOSDebFormatRawLogEvent(shortTime, json, &abnormal);
+                if (!displayLine) continue;
+            }
+        }
+        if (!displayLine) {
+            if ([body rangeOfString:@"(error|失败|异常|停止|circuit breaker|miss|drop)" options:NSRegularExpressionSearch | NSCaseInsensitiveSearch].location != NSNotFound) {
+                abnormal = YES;
+            }
+            displayLine = shortTime.length ? [NSString stringWithFormat:@"%@ %@", shortTime, body] : body;
+        }
+
+        totalEvents++;
+        if (onlyAbnormal && !abnormal) continue;
+        if (kw.length > 0 && ![displayLine localizedCaseInsensitiveContainsString:kw]) continue;
+        [formatted addObject:displayLine];
+    }
+
+    static const NSUInteger kMaxDisplayLines = 250;
+    NSArray<NSString *> *slice = formatted.count > kMaxDisplayLines
+        ? [formatted subarrayWithRange:NSMakeRange(formatted.count - kMaxDisplayLines, kMaxDisplayLines)]
+        : formatted;
+
+    return @{
+        @"text": [slice componentsJoinedByString:@"\n"],
+        @"shown": @(slice.count),
+        @"total": @(totalEvents),
+        @"kb": @((NSUInteger)((fileSize + 512) / 1024))
+    };
+}
 
 static void IOSDebOwnDescriptor(NSMutableArray *items, NSString *text, UIView *view) {
     if (!text.length || !view.window) return;
@@ -239,14 +390,42 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     UIButton *_recordButton;
     UIButton *_translateButton;
     UIButton *_voiceButton;
-    UIView *_telemetryBar;
-    UILabel *_tokenBadge;
-    UILabel *_stepBadge;
-    UILabel *_timeBadge;
+
+    // Compact summary strip (replaces permanent middle log void & telemetry bar)
+    UIView *_summaryCard;
+    UIView *_summaryDot;
+    UILabel *_summaryMetaLabel;
+    UILabel *_summaryChevron;
+
+    // Full-size Log Center Drawer
+    UIView *_logContainer;
+    UISegmentedControl *_logTabControl;
+    UISegmentedControl *_logFilterControl;
+    UIButton *_logSearchBtn;
+    UIButton *_logRefreshBtn;
+    UIButton *_logCopyBtn;
+    UIButton *_logClearBtn;
+    UITextView *_rawLogView;
+    UILabel *_stepEmptyLabel;
+    UILabel *_logFooterMetrics;
+    UILabel *_logFooterCount;
+    BOOL _logDrawerOpen;
+    BOOL _logOnlyAbnormal;
+    NSString *_logSearchKeyword;
+    NSTimer *_logRefreshTimer;
+
+    // Top ultra-thin Live HUD (shown only when running & panel collapsed)
+    UIView *_liveHud;
+    UIView *_liveHudDot;
+    UILabel *_liveHudLabel;
+    BOOL _liveHudDismissedForRun;
+
+    CGFloat _keyboardBottomInset;
+    CGFloat _currentPanelHeight;
+
     UIView *_skillContainer;
     UITableView *_skillTable;
     UILabel *_skillEmptyLabel;
-    UIButton *_barStopHint;
     IOSDebSkill *_activeSkill;
 
     // Skill Detail Inspector View
@@ -369,9 +548,10 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     longPress.allowableMovement = 12.0; // restrict movement so dragging cancels long press
     [_bar addGestureRecognizer:longPress];
 
-    // Panel (hidden until expanded).
+    // Panel (hidden until expanded; compact by default to save screen space).
     CGFloat panelW = w - 24;
-    _panel = [[UIView alloc] initWithFrame:CGRectMake(12, h - kPanelHeight - 12, panelW, kPanelHeight)];
+    _currentPanelHeight = kCompactPanelHeight;
+    _panel = [[UIView alloc] initWithFrame:CGRectMake(12, h - kCompactPanelHeight - 12, panelW, kCompactPanelHeight)];
     _panel.backgroundColor = [UIColor colorWithRed:0.045 green:0.065 blue:0.090 alpha:0.92];
     _panel.layer.cornerRadius = 22;
     if (@available(iOS 13.0, *)) {
@@ -391,13 +571,13 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         [_panel insertSubview:blurView atIndex:0];
     }
 
-    _brandLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 8, 74, 20)];
+    _brandLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 8, 66, 20)];
     _brandLabel.text = @"AgentOS";
     _brandLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
     _brandLabel.textColor = [UIColor whiteColor];
     [_panel addSubview:_brandLabel];
 
-    _versionBadge = [[UILabel alloc] initWithFrame:CGRectMake(92, 9, 82, 18)];
+    _versionBadge = [[UILabel alloc] initWithFrame:CGRectMake(82, 9, 78, 18)];
     _versionBadge.text = [NSString stringWithFormat:@"v%@", AGENTOS_VERSION];
     _versionBadge.font = [UIFont monospacedDigitSystemFontOfSize:9 weight:UIFontWeightSemibold];
     _versionBadge.textColor = [UIColor colorWithWhite:1 alpha:0.65];
@@ -409,20 +589,8 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     _versionBadge.textAlignment = NSTextAlignmentCenter;
     [_panel addSubview:_versionBadge];
 
-    _updateBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    _updateBtn.frame = CGRectMake(panelW - 14 - 26 - 6 - 54, 7, 54, 22);
-    [_updateBtn setTitle:@"⟳ 更新" forState:UIControlStateNormal];
-    _updateBtn.titleLabel.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightMedium];
-    [_updateBtn setTitleColor:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1] forState:UIControlStateNormal];
-    _updateBtn.backgroundColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.12];
-    _updateBtn.layer.cornerRadius = 11;
-    _updateBtn.layer.borderWidth = 0.5;
-    _updateBtn.layer.borderColor = [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:0.35].CGColor;
-    [_updateBtn addTarget:self action:@selector(onCheckUpdate) forControlEvents:UIControlEventTouchUpInside];
-    [_panel addSubview:_updateBtn];
-
     _collapseBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    _collapseBtn.frame = CGRectMake(panelW - 14 - 26, 6, 26, 26);
+    _collapseBtn.frame = CGRectMake(panelW - 12 - 26, 6, 26, 26);
     [_collapseBtn setTitle:@"▾" forState:UIControlStateNormal];
     _collapseBtn.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightBold];
     [_collapseBtn setTitleColor:[UIColor colorWithWhite:1 alpha:0.75] forState:UIControlStateNormal];
@@ -432,6 +600,18 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     _collapseBtn.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.12].CGColor;
     [_collapseBtn addTarget:self action:@selector(collapse) forControlEvents:UIControlEventTouchUpInside];
     [_panel addSubview:_collapseBtn];
+
+    _updateBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    _updateBtn.frame = CGRectMake(_collapseBtn.frame.origin.x - 6 - 48, 7, 48, 22);
+    [_updateBtn setTitle:@"⟳ 更新" forState:UIControlStateNormal];
+    _updateBtn.titleLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightMedium];
+    [_updateBtn setTitleColor:IOSDebAccentMint() forState:UIControlStateNormal];
+    _updateBtn.backgroundColor = [IOSDebAccentMint() colorWithAlphaComponent:0.12];
+    _updateBtn.layer.cornerRadius = 11;
+    _updateBtn.layer.borderWidth = 0.5;
+    _updateBtn.layer.borderColor = [IOSDebAccentMint() colorWithAlphaComponent:0.35].CGColor;
+    [_updateBtn addTarget:self action:@selector(onCheckUpdate) forControlEvents:UIControlEventTouchUpInside];
+    [_panel addSubview:_updateBtn];
 
     // Command input & Send inline
     _input = [[UITextView alloc] initWithFrame:CGRectMake(12, 34, panelW - 24 - 58, 36)];
@@ -528,7 +708,8 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     [_panel addSubview:_voiceButton];
 
     // Skill Library Drawer Container (covers _panel, hidden by default)
-    _skillContainer = [[UIView alloc] initWithFrame:_panel.bounds];
+    _skillContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, panelW, kSkillPanelHeight)];
+    _skillContainer.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _skillContainer.backgroundColor = [self panelBackground];
     _skillContainer.layer.cornerRadius = 20;
     _skillContainer.layer.masksToBounds = YES;
@@ -561,8 +742,9 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     libDivider.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
     [_skillContainer addSubview:libDivider];
 
-    _skillTable = [[UITableView alloc] initWithFrame:CGRectMake(0, 39, w - 24, _panel.bounds.size.height - 39)
+    _skillTable = [[UITableView alloc] initWithFrame:CGRectMake(0, 39, w - 24, kSkillPanelHeight - 39)
                                                style:UITableViewStylePlain];
+    _skillTable.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _skillTable.backgroundColor = [UIColor clearColor];
     _skillTable.separatorColor = [UIColor colorWithWhite:1 alpha:0.06];
     _skillTable.rowHeight = 50;
@@ -581,7 +763,8 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     [_skillContainer addSubview:_skillEmptyLabel];
 
     // Skill Detail Inspector Card (covers _panel, hidden by default)
-    _skillDetailContainer = [[UIView alloc] initWithFrame:_panel.bounds];
+    _skillDetailContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, panelW, kSkillPanelHeight)];
+    _skillDetailContainer.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _skillDetailContainer.backgroundColor = [self panelBackground];
     _skillDetailContainer.layer.cornerRadius = 20;
     _skillDetailContainer.layer.masksToBounds = YES;
@@ -715,7 +898,8 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     [_panel addSubview:_skillDetailContainer];
 
     // Skill Edit Container (covers _panel, hidden by default)
-    _skillEditContainer = [[UIView alloc] initWithFrame:_panel.bounds];
+    _skillEditContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, panelW, kSkillPanelHeight)];
+    _skillEditContainer.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     _skillEditContainer.backgroundColor = [self panelBackground];
     _skillEditContainer.layer.cornerRadius = 20;
     _skillEditContainer.layer.masksToBounds = YES;
@@ -814,78 +998,330 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 
     [_panel addSubview:_skillContainer];
 
-    _divider = [[UIView alloc] initWithFrame:CGRectMake(12, 110, panelW - 24, 0.5)];
+    _divider = [[UIView alloc] initWithFrame:CGRectMake(12, 108, panelW - 24, 0.5)];
     _divider.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
     [_panel addSubview:_divider];
 
-    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 114, panelW - 28 - 65, 14)];
-    _statusLabel.font = [UIFont systemFontOfSize:10];
-    _statusLabel.textColor = [UIColor colorWithWhite:1 alpha:0.42];
-    [_panel addSubview:_statusLabel];
+    // Compact status + latest log summary strip (tap opens full Log Center Drawer)
+    _summaryCard = [[UIView alloc] initWithFrame:CGRectMake(10, 113, panelW - 20, 41)];
+    _summaryCard.backgroundColor = [UIColor colorWithWhite:1 alpha:0.05];
+    _summaryCard.layer.cornerRadius = 11;
+    if (@available(iOS 13.0, *)) {
+        _summaryCard.layer.cornerCurve = kCACornerCurveContinuous;
+    }
+    _summaryCard.layer.borderWidth = 0.5;
+    _summaryCard.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
+    UITapGestureRecognizer *summaryTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(openLogDrawer)];
+    [_summaryCard addGestureRecognizer:summaryTap];
+    [_panel addSubview:_summaryCard];
 
-    _counter = [[UILabel alloc] initWithFrame:CGRectMake(panelW - 14 - 65, 114, 65, 14)];
+    CGFloat cardW = _summaryCard.bounds.size.width;
+    _summaryDot = [[UIView alloc] initWithFrame:CGRectMake(10, 10, 6, 6)];
+    _summaryDot.backgroundColor = IOSDebAccentMint();
+    _summaryDot.layer.cornerRadius = 3;
+    [_summaryCard addSubview:_summaryDot];
+
+    _summaryChevron = [[UILabel alloc] initWithFrame:CGRectMake(cardW - 56, 5, 48, 16)];
+    _summaryChevron.text = @"详情 ›";
+    _summaryChevron.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightSemibold];
+    _summaryChevron.textColor = IOSDebAccentSky();
+    _summaryChevron.textAlignment = NSTextAlignmentRight;
+    [_summaryCard addSubview:_summaryChevron];
+
+    _statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(21, 5, cardW - 21 - 58, 16)];
+    _statusLabel.text = @"就绪 · 输入指令、选技能，点击查看详情";
+    _statusLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+    _statusLabel.textColor = [UIColor colorWithWhite:1 alpha:0.78];
+    _statusLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    [_summaryCard addSubview:_statusLabel];
+
+    _counter = [[UILabel alloc] initWithFrame:CGRectMake(cardW - 72, 22, 64, 14)];
     _counter.text = @"0 / 500";
     _counter.font = [UIFont monospacedDigitSystemFontOfSize:9.5 weight:UIFontWeightRegular];
-    _counter.textColor = [UIColor colorWithWhite:1 alpha:0.42];
+    _counter.textColor = [UIColor colorWithWhite:1 alpha:0.45];
     _counter.textAlignment = NSTextAlignmentRight;
-    [_panel addSubview:_counter];
+    _counter.hidden = YES;
+    [_summaryCard addSubview:_counter];
 
-    _table = [[UITableView alloc] initWithFrame:CGRectMake(0, 130, panelW, 94)
-                                         style:UITableViewStylePlain];
-    _table.backgroundColor = [UIColor clearColor];
-    _table.separatorColor = [UIColor colorWithWhite:1 alpha:0.05];
-    _table.rowHeight = 33;
-    _table.dataSource = self;
-    _table.delegate = self;
-    _table.scrollEnabled = YES;
-    [_table registerClass:[IOSDebStepCell class] forCellReuseIdentifier:@"step"];
-    [_panel addSubview:_table];
-
-    // Telemetry Dashboard (3 badges)
-    _telemetryBar = [[UIView alloc] initWithFrame:CGRectMake(actionMargin, 229, panelW - 2 * actionMargin, 22)];
-    _telemetryBar.backgroundColor = [UIColor clearColor];
-    [_panel addSubview:_telemetryBar];
-
-    CGFloat teleW = floor((panelW - 2 * actionMargin - 2 * actionGap) / 3.0);
-    _tokenBadge = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, teleW, 22)];
-    _tokenBadge.text = @"💎 0 Tok";
-    _tokenBadge.textAlignment = NSTextAlignmentCenter;
-    _tokenBadge.font = [UIFont monospacedDigitSystemFontOfSize:9.5 weight:UIFontWeightMedium];
-    _tokenBadge.textColor = [UIColor colorWithWhite:1 alpha:0.55];
-    _tokenBadge.backgroundColor = [UIColor colorWithWhite:1 alpha:0.06];
-    _tokenBadge.layer.cornerRadius = 6;
-    _tokenBadge.layer.borderWidth = 0.5;
-    _tokenBadge.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.08].CGColor;
-    _tokenBadge.layer.masksToBounds = YES;
-    [_telemetryBar addSubview:_tokenBadge];
-
-    _stepBadge = [[UILabel alloc] initWithFrame:CGRectMake(teleW + actionGap, 0, teleW, 22)];
-    _stepBadge.text = @"🎯 步数 0/100";
-    _stepBadge.textAlignment = NSTextAlignmentCenter;
-    _stepBadge.font = [UIFont monospacedDigitSystemFontOfSize:9.5 weight:UIFontWeightMedium];
-    _stepBadge.textColor = [UIColor colorWithWhite:1 alpha:0.55];
-    _stepBadge.backgroundColor = [UIColor colorWithWhite:1 alpha:0.06];
-    _stepBadge.layer.cornerRadius = 6;
-    _stepBadge.layer.borderWidth = 0.5;
-    _stepBadge.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.08].CGColor;
-    _stepBadge.layer.masksToBounds = YES;
-    [_telemetryBar addSubview:_stepBadge];
-
-    _timeBadge = [[UILabel alloc] initWithFrame:CGRectMake(2 * (teleW + actionGap), 0, teleW, 22)];
-    _timeBadge.text = @"⏱ 耗时 0.0s";
-    _timeBadge.textAlignment = NSTextAlignmentCenter;
-    _timeBadge.font = [UIFont monospacedDigitSystemFontOfSize:9.5 weight:UIFontWeightMedium];
-    _timeBadge.textColor = [UIColor colorWithWhite:1 alpha:0.55];
-    _timeBadge.backgroundColor = [UIColor colorWithWhite:1 alpha:0.06];
-    _timeBadge.layer.cornerRadius = 6;
-    _timeBadge.layer.borderWidth = 0.5;
-    _timeBadge.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.08].CGColor;
-    _timeBadge.layer.masksToBounds = YES;
-    [_telemetryBar addSubview:_timeBadge];
+    _summaryMetaLabel = [[UILabel alloc] initWithFrame:CGRectMake(21, 22, cardW - 21 - 76, 14)];
+    _summaryMetaLabel.text = @"步骤 0/100 · 💎 0 Tok · ⏱ 0.0s";
+    _summaryMetaLabel.font = [UIFont monospacedDigitSystemFontOfSize:9.5 weight:UIFontWeightRegular];
+    _summaryMetaLabel.textColor = [UIColor colorWithWhite:1 alpha:0.48];
+    [_summaryCard addSubview:_summaryMetaLabel];
 
     _tokenLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     _tokenLabel.hidden = YES;
     [_panel addSubview:_tokenLabel];
+
+    // Full-Size Log Center Drawer (covers _panel when opened)
+    _logContainer = [[UIView alloc] initWithFrame:_panel.bounds];
+    _logContainer.backgroundColor = [self panelBackground];
+    _logContainer.layer.cornerRadius = 20;
+    _logContainer.layer.masksToBounds = YES;
+    _logContainer.hidden = YES;
+    _logContainer.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+
+    UIView *logHeader = [[UIView alloc] init];
+    logHeader.translatesAutoresizingMaskIntoConstraints = NO;
+    [_logContainer addSubview:logHeader];
+
+    UIButton *logBackBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    logBackBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [logBackBtn setTitle:@"‹ 返回" forState:UIControlStateNormal];
+    logBackBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+    [logBackBtn setTitleColor:IOSDebAccentSky() forState:UIControlStateNormal];
+    [logBackBtn addTarget:self action:@selector(closeLogDrawer) forControlEvents:UIControlEventTouchUpInside];
+    [logHeader addSubview:logBackBtn];
+
+    _logTabControl = [[UISegmentedControl alloc] initWithItems:@[@"步骤轨迹", @"原始日志"]];
+    _logTabControl.translatesAutoresizingMaskIntoConstraints = NO;
+    _logTabControl.selectedSegmentIndex = 0;
+    if (@available(iOS 13.0, *)) {
+        _logTabControl.selectedSegmentTintColor = [IOSDebAccentSky() colorWithAlphaComponent:0.28];
+    }
+    [_logTabControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.65],
+        NSFontAttributeName: [UIFont systemFontOfSize:11.5 weight:UIFontWeightMedium]
+    } forState:UIControlStateNormal];
+    [_logTabControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName: [UIColor whiteColor],
+        NSFontAttributeName: [UIFont systemFontOfSize:11.5 weight:UIFontWeightBold]
+    } forState:UIControlStateSelected];
+    [_logTabControl addTarget:self action:@selector(onLogTabChanged) forControlEvents:UIControlEventValueChanged];
+    [logHeader addSubview:_logTabControl];
+
+    _logCopyBtn = IOSDebMakeDrawerButton(@"复制", IOSDebAccentMint(), [IOSDebAccentMint() colorWithAlphaComponent:0.14], 11);
+    _logCopyBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [_logCopyBtn addTarget:self action:@selector(onCopyCurrentLogs) forControlEvents:UIControlEventTouchUpInside];
+    [logHeader addSubview:_logCopyBtn];
+
+    UIView *logHeaderDiv = [[UIView alloc] init];
+    logHeaderDiv.translatesAutoresizingMaskIntoConstraints = NO;
+    logHeaderDiv.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    [_logContainer addSubview:logHeaderDiv];
+
+    UIView *logToolbar = [[UIView alloc] init];
+    logToolbar.translatesAutoresizingMaskIntoConstraints = NO;
+    [_logContainer addSubview:logToolbar];
+
+    _logFilterControl = [[UISegmentedControl alloc] initWithItems:@[@"全部", @"异常/未直切"]];
+    _logFilterControl.translatesAutoresizingMaskIntoConstraints = NO;
+    _logFilterControl.selectedSegmentIndex = 0;
+    if (@available(iOS 13.0, *)) {
+        _logFilterControl.selectedSegmentTintColor = [UIColor colorWithWhite:1 alpha:0.18];
+    }
+    [_logFilterControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName: [UIColor colorWithWhite:1 alpha:0.6],
+        NSFontAttributeName: [UIFont systemFontOfSize:10.5 weight:UIFontWeightMedium]
+    } forState:UIControlStateNormal];
+    [_logFilterControl setTitleTextAttributes:@{
+        NSForegroundColorAttributeName: [UIColor whiteColor],
+        NSFontAttributeName: [UIFont systemFontOfSize:10.5 weight:UIFontWeightBold]
+    } forState:UIControlStateSelected];
+    [_logFilterControl addTarget:self action:@selector(onLogFilterChanged) forControlEvents:UIControlEventValueChanged];
+    [logToolbar addSubview:_logFilterControl];
+
+    _logSearchBtn = IOSDebMakeDrawerButton(@"搜词", IOSDebAccentSky(), nil, 10.5);
+    _logSearchBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [_logSearchBtn addTarget:self action:@selector(onLogSearchTap) forControlEvents:UIControlEventTouchUpInside];
+    [logToolbar addSubview:_logSearchBtn];
+
+    _logRefreshBtn = IOSDebMakeDrawerButton(@"刷新", [UIColor colorWithWhite:1 alpha:0.8], nil, 10.5);
+    _logRefreshBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [_logRefreshBtn addTarget:self action:@selector(onRefreshLogTap) forControlEvents:UIControlEventTouchUpInside];
+    [logToolbar addSubview:_logRefreshBtn];
+
+    UIColor *dangerRed = [UIColor colorWithRed:0.95 green:0.38 blue:0.35 alpha:1.0];
+    _logClearBtn = IOSDebMakeDrawerButton(@"清空", dangerRed, [dangerRed colorWithAlphaComponent:0.12], 10.5);
+    _logClearBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [_logClearBtn addTarget:self action:@selector(onClearLogsTap) forControlEvents:UIControlEventTouchUpInside];
+    [logToolbar addSubview:_logClearBtn];
+
+    _table = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
+    _table.translatesAutoresizingMaskIntoConstraints = NO;
+    _table.backgroundColor = [UIColor clearColor];
+    _table.separatorColor = [UIColor colorWithWhite:1 alpha:0.06];
+    _table.rowHeight = 36;
+    _table.dataSource = self;
+    _table.delegate = self;
+    _table.scrollEnabled = YES;
+    _table.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
+    [_table registerClass:[IOSDebStepCell class] forCellReuseIdentifier:@"step"];
+    [_logContainer addSubview:_table];
+
+    _stepEmptyLabel = [[UILabel alloc] init];
+    _stepEmptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    _stepEmptyLabel.numberOfLines = 2;
+    _stepEmptyLabel.textAlignment = NSTextAlignmentCenter;
+    _stepEmptyLabel.font = [UIFont systemFontOfSize:12.5];
+    _stepEmptyLabel.textColor = [UIColor colorWithWhite:1 alpha:0.38];
+    _stepEmptyLabel.text = @"暂无执行步骤\n下达指令或运行技能后将在此显示轨迹";
+    [_logContainer addSubview:_stepEmptyLabel];
+
+    _rawLogView = [[UITextView alloc] init];
+    _rawLogView.translatesAutoresizingMaskIntoConstraints = NO;
+    _rawLogView.editable = NO;
+    _rawLogView.selectable = YES;
+    _rawLogView.backgroundColor = [UIColor colorWithWhite:1 alpha:0.04];
+    _rawLogView.layer.cornerRadius = 10;
+    _rawLogView.layer.borderWidth = 0.5;
+    _rawLogView.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.08].CGColor;
+    _rawLogView.textContainerInset = UIEdgeInsetsMake(8, 8, 8, 8);
+    _rawLogView.font = [UIFont monospacedSystemFontOfSize:10.5 weight:UIFontWeightRegular];
+    _rawLogView.textColor = [UIColor colorWithWhite:0.92 alpha:1.0];
+    _rawLogView.hidden = YES;
+    [_logContainer addSubview:_rawLogView];
+
+    UIView *logFooter = [[UIView alloc] init];
+    logFooter.translatesAutoresizingMaskIntoConstraints = NO;
+    logFooter.backgroundColor = [UIColor colorWithWhite:1 alpha:0.04];
+    [_logContainer addSubview:logFooter];
+
+    _logFooterMetrics = [[UILabel alloc] init];
+    _logFooterMetrics.translatesAutoresizingMaskIntoConstraints = NO;
+    _logFooterMetrics.font = [UIFont monospacedDigitSystemFontOfSize:9.5 weight:UIFontWeightMedium];
+    _logFooterMetrics.textColor = [UIColor colorWithWhite:1 alpha:0.55];
+    _logFooterMetrics.text = @"💎 0 Tok · 🎯 0/100 · ⏱ 0.0s";
+    [logFooter addSubview:_logFooterMetrics];
+
+    _logFooterCount = [[UILabel alloc] init];
+    _logFooterCount.translatesAutoresizingMaskIntoConstraints = NO;
+    _logFooterCount.font = [UIFont monospacedDigitSystemFontOfSize:9.5 weight:UIFontWeightRegular];
+    _logFooterCount.textColor = [UIColor colorWithWhite:1 alpha:0.45];
+    _logFooterCount.textAlignment = NSTextAlignmentRight;
+    _logFooterCount.text = @"共 0 条";
+    [logFooter addSubview:_logFooterCount];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [logHeader.topAnchor constraintEqualToAnchor:_logContainer.topAnchor],
+        [logHeader.leadingAnchor constraintEqualToAnchor:_logContainer.leadingAnchor],
+        [logHeader.trailingAnchor constraintEqualToAnchor:_logContainer.trailingAnchor],
+        [logHeader.heightAnchor constraintEqualToConstant:38],
+
+        [logBackBtn.leadingAnchor constraintEqualToAnchor:logHeader.leadingAnchor constant:10],
+        [logBackBtn.centerYAnchor constraintEqualToAnchor:logHeader.centerYAnchor],
+        [logBackBtn.widthAnchor constraintEqualToConstant:56],
+        [logBackBtn.heightAnchor constraintEqualToConstant:28],
+
+        [_logTabControl.centerXAnchor constraintEqualToAnchor:logHeader.centerXAnchor],
+        [_logTabControl.centerYAnchor constraintEqualToAnchor:logHeader.centerYAnchor],
+        [_logTabControl.widthAnchor constraintEqualToConstant:160],
+        [_logTabControl.heightAnchor constraintEqualToConstant:26],
+
+        [_logCopyBtn.trailingAnchor constraintEqualToAnchor:logHeader.trailingAnchor constant:-10],
+        [_logCopyBtn.centerYAnchor constraintEqualToAnchor:logHeader.centerYAnchor],
+        [_logCopyBtn.heightAnchor constraintEqualToConstant:24],
+
+        [logHeaderDiv.topAnchor constraintEqualToAnchor:logHeader.bottomAnchor],
+        [logHeaderDiv.leadingAnchor constraintEqualToAnchor:_logContainer.leadingAnchor],
+        [logHeaderDiv.trailingAnchor constraintEqualToAnchor:_logContainer.trailingAnchor],
+        [logHeaderDiv.heightAnchor constraintEqualToConstant:1],
+
+        [logToolbar.topAnchor constraintEqualToAnchor:logHeaderDiv.bottomAnchor constant:5],
+        [logToolbar.leadingAnchor constraintEqualToAnchor:_logContainer.leadingAnchor constant:10],
+        [logToolbar.trailingAnchor constraintEqualToAnchor:_logContainer.trailingAnchor constant:-10],
+        [logToolbar.heightAnchor constraintEqualToConstant:26],
+
+        [_logFilterControl.leadingAnchor constraintEqualToAnchor:logToolbar.leadingAnchor],
+        [_logFilterControl.centerYAnchor constraintEqualToAnchor:logToolbar.centerYAnchor],
+        [_logFilterControl.heightAnchor constraintEqualToConstant:24],
+
+        [_logClearBtn.trailingAnchor constraintEqualToAnchor:logToolbar.trailingAnchor],
+        [_logClearBtn.centerYAnchor constraintEqualToAnchor:logToolbar.centerYAnchor],
+        [_logClearBtn.heightAnchor constraintEqualToConstant:24],
+
+        [_logRefreshBtn.trailingAnchor constraintEqualToAnchor:_logClearBtn.leadingAnchor constant:-6],
+        [_logRefreshBtn.centerYAnchor constraintEqualToAnchor:logToolbar.centerYAnchor],
+        [_logRefreshBtn.heightAnchor constraintEqualToConstant:24],
+
+        [_logSearchBtn.trailingAnchor constraintEqualToAnchor:_logRefreshBtn.leadingAnchor constant:-6],
+        [_logSearchBtn.centerYAnchor constraintEqualToAnchor:logToolbar.centerYAnchor],
+        [_logSearchBtn.heightAnchor constraintEqualToConstant:24],
+        [_logSearchBtn.leadingAnchor constraintGreaterThanOrEqualToAnchor:_logFilterControl.trailingAnchor constant:6],
+
+        [logFooter.leadingAnchor constraintEqualToAnchor:_logContainer.leadingAnchor],
+        [logFooter.trailingAnchor constraintEqualToAnchor:_logContainer.trailingAnchor],
+        [logFooter.bottomAnchor constraintEqualToAnchor:_logContainer.bottomAnchor],
+        [logFooter.heightAnchor constraintEqualToConstant:24],
+
+        [_logFooterMetrics.leadingAnchor constraintEqualToAnchor:logFooter.leadingAnchor constant:12],
+        [_logFooterMetrics.centerYAnchor constraintEqualToAnchor:logFooter.centerYAnchor],
+        [_logFooterCount.trailingAnchor constraintEqualToAnchor:logFooter.trailingAnchor constant:-12],
+        [_logFooterCount.centerYAnchor constraintEqualToAnchor:logFooter.centerYAnchor],
+        [_logFooterMetrics.trailingAnchor constraintLessThanOrEqualToAnchor:_logFooterCount.leadingAnchor constant:-8],
+
+        [_table.topAnchor constraintEqualToAnchor:logToolbar.bottomAnchor constant:6],
+        [_table.leadingAnchor constraintEqualToAnchor:_logContainer.leadingAnchor],
+        [_table.trailingAnchor constraintEqualToAnchor:_logContainer.trailingAnchor],
+        [_table.bottomAnchor constraintEqualToAnchor:logFooter.topAnchor],
+
+        [_stepEmptyLabel.centerXAnchor constraintEqualToAnchor:_table.centerXAnchor],
+        [_stepEmptyLabel.centerYAnchor constraintEqualToAnchor:_table.centerYAnchor],
+        [_stepEmptyLabel.leadingAnchor constraintEqualToAnchor:_logContainer.leadingAnchor constant:24],
+        [_stepEmptyLabel.trailingAnchor constraintEqualToAnchor:_logContainer.trailingAnchor constant:-24],
+
+        [_rawLogView.topAnchor constraintEqualToAnchor:logToolbar.bottomAnchor constant:6],
+        [_rawLogView.leadingAnchor constraintEqualToAnchor:_logContainer.leadingAnchor constant:10],
+        [_rawLogView.trailingAnchor constraintEqualToAnchor:_logContainer.trailingAnchor constant:-10],
+        [_rawLogView.bottomAnchor constraintEqualToAnchor:logFooter.topAnchor constant:-6],
+    ]];
+
+    [_panel addSubview:_logContainer];
+
+    // Running Top Ultra-Thin Live HUD (only visible while running & panel collapsed)
+    CGFloat hudY = (h >= 780) ? 48.0 : 22.0;
+    _liveHud = [[UIView alloc] initWithFrame:CGRectMake(12, hudY, panelW, 28)];
+    _liveHud.backgroundColor = [UIColor colorWithRed:0.045 green:0.065 blue:0.095 alpha:0.92];
+    _liveHud.layer.cornerRadius = 14;
+    if (@available(iOS 13.0, *)) {
+        _liveHud.layer.cornerCurve = kCACornerCurveContinuous;
+    }
+    _liveHud.layer.borderWidth = 0.75;
+    _liveHud.layer.borderColor = [IOSDebAccentSky() colorWithAlphaComponent:0.5].CGColor;
+    _liveHud.hidden = YES;
+
+    _liveHudDot = [[UIView alloc] initWithFrame:CGRectMake(10, 11, 6, 6)];
+    _liveHudDot.backgroundColor = IOSDebAccentSky();
+    _liveHudDot.layer.cornerRadius = 3;
+    [_liveHud addSubview:_liveHudDot];
+
+    UIButton *hudCloseBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    hudCloseBtn.frame = CGRectMake(panelW - 26, 3, 22, 22);
+    [hudCloseBtn setTitle:@"×" forState:UIControlStateNormal];
+    hudCloseBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
+    [hudCloseBtn setTitleColor:[UIColor colorWithWhite:1 alpha:0.55] forState:UIControlStateNormal];
+    [hudCloseBtn addTarget:self action:@selector(onDismissLiveHud) forControlEvents:UIControlEventTouchUpInside];
+    [_liveHud addSubview:hudCloseBtn];
+
+    UIButton *hudStopBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    hudStopBtn.frame = CGRectMake(panelW - 26 - 38, 4, 34, 20);
+    [hudStopBtn setTitle:@"停止" forState:UIControlStateNormal];
+    hudStopBtn.titleLabel.font = [UIFont boldSystemFontOfSize:10];
+    [hudStopBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    hudStopBtn.backgroundColor = [UIColor colorWithRed:0.898 green:0.329 blue:0.294 alpha:0.9];
+    hudStopBtn.layer.cornerRadius = 10;
+    [hudStopBtn addTarget:self action:@selector(onStop) forControlEvents:UIControlEventTouchUpInside];
+    [_liveHud addSubview:hudStopBtn];
+
+    UIButton *hudLogBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    hudLogBtn.frame = CGRectMake(panelW - 26 - 38 - 38, 4, 34, 20);
+    [hudLogBtn setTitle:@"日志" forState:UIControlStateNormal];
+    hudLogBtn.titleLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightSemibold];
+    [hudLogBtn setTitleColor:IOSDebAccentSky() forState:UIControlStateNormal];
+    hudLogBtn.backgroundColor = [IOSDebAccentSky() colorWithAlphaComponent:0.16];
+    hudLogBtn.layer.cornerRadius = 10;
+    [hudLogBtn addTarget:self action:@selector(expandAndOpenLogs) forControlEvents:UIControlEventTouchUpInside];
+    [_liveHud addSubview:hudLogBtn];
+
+    _liveHudLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 4, hudLogBtn.frame.origin.x - 24, 20)];
+    _liveHudLabel.font = [UIFont monospacedDigitSystemFontOfSize:10.5 weight:UIFontWeightMedium];
+    _liveHudLabel.textColor = [UIColor whiteColor];
+    _liveHudLabel.text = @"准备执行…";
+    _liveHudLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    _liveHudLabel.userInteractionEnabled = YES;
+    UITapGestureRecognizer *hudTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(expandAndOpenLogs)];
+    [_liveHudLabel addGestureRecognizer:hudTap];
+    [_liveHud addSubview:_liveHudLabel];
 
     // Scene-independent container.
     UIViewController *vc = [[UIViewController alloc] init];
@@ -904,6 +1340,7 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 
     [vc.view addSubview:_panel];
     [vc.view addSubview:_bar];
+    [vc.view addSubview:_liveHud];
 
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(onKeyboard:)
@@ -943,6 +1380,8 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 }
 
 - (void)detach {
+    [_logRefreshTimer invalidate];
+    _logRefreshTimer = nil;
     _window.accessibilityElementsHidden = _savedWindowAXHidden;
     _window.rootViewController.view.accessibilityElementsHidden = _savedRootAXHidden;
     _window.hidden = YES;
@@ -974,7 +1413,19 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     NSMutableArray *items = [NSMutableArray array];
     if (!_window || _window.hidden) return items;
     IOSDebOwnDescriptors(_window.rootViewController.view, items);
-    if (!_table.hidden && !_panel.hidden) {
+    if (_liveHud && !_liveHud.hidden && _liveHud.alpha > 0) {
+        CGRect f = _liveHud.frame;
+        [items addObject:@{@"boundsOnly": @YES,
+                           @"rect": @{@"x": @(f.origin.x), @"y": @(f.origin.y),
+                                      @"width": @(f.size.width), @"height": @(f.size.height)}}];
+    }
+    if (_panel && !_panel.hidden && _panel.alpha > 0) {
+        CGRect pf = _panel.frame;
+        [items addObject:@{@"boundsOnly": @YES,
+                           @"rect": @{@"x": @(pf.origin.x), @"y": @(pf.origin.y),
+                                      @"width": @(pf.size.width), @"height": @(pf.size.height)}}];
+    }
+    if (!_logContainer.hidden && !_table.hidden && !_panel.hidden) {
         for (IOSDebStepCell *cell in _table.visibleCells) if (!cell.hidden) [cell addQuizDescriptors:items];
     }
     return items;
@@ -1286,7 +1737,7 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 
         IOSDebLog(@"[voice] transcribed: %@", text.length > 60 ? [text substringToIndex:60] : text);
         s->_input.text = text;
-        s->_counter.text = [NSString stringWithFormat:@"%lu / 500", (unsigned long)text.length];
+        [s updateInputCounter];
         [s setStatus:[NSString stringWithFormat:@"✅ 识别成功 (%lu字)", (unsigned long)text.length]
                color:[UIColor colorWithRed:0.3 green:0.85 blue:0.4 alpha:1]];
         [s expand];
@@ -1370,18 +1821,81 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     [self flashBarDenied];
 }
 
-#pragma mark - Expand / collapse
+#pragma mark - Expand / collapse & Log Center Drawer
+
+- (CGFloat)logPanelTargetHeight {
+    CGFloat supH = _panel.superview ? _panel.superview.bounds.size.height : [UIScreen mainScreen].bounds.size.height;
+    return MIN(kLogMaxPanelHeight, MAX(kSkillPanelHeight, floor(supH * 0.56)));
+}
+
+- (void)resizePanelToHeight:(CGFloat)targetH animated:(BOOL)animated {
+    if (!_panel || !_panel.superview) return;
+    _currentPanelHeight = targetH;
+    CGRect sup = _panel.superview.bounds;
+    CGFloat maxAllowedH = MAX(140.0, sup.size.height - _keyboardBottomInset - 56.0);
+    CGFloat clampedH = MIN(targetH, maxAllowedH);
+    CGFloat y = MAX(44.0, sup.size.height - clampedH - _keyboardBottomInset - 12.0);
+    CGRect targetFrame = CGRectMake(12, y, sup.size.width - 24, clampedH);
+
+    void (^apply)(void) = ^{
+        self->_panel.frame = targetFrame;
+        self->_skillContainer.frame = self->_panel.bounds;
+        self->_skillDetailContainer.frame = self->_panel.bounds;
+        self->_skillEditContainer.frame = self->_panel.bounds;
+        self->_logContainer.frame = self->_panel.bounds;
+    };
+
+    if (animated) {
+        [UIView animateWithDuration:0.26 delay:0 usingSpringWithDamping:0.86 initialSpringVelocity:0.3 options:UIViewAnimationOptionCurveEaseOut animations:apply completion:nil];
+    } else {
+        apply();
+    }
+}
+
+- (void)updateInputCounter {
+    BOOL isCode = [_input.text containsString:@"{"] || [_input.text containsString:@"\"name\""] || [_input.text containsString:@"loopSteps"] || [_input.text hasPrefix:@"agentos://"];
+    NSUInteger maxLen = isCode ? 10000 : 500;
+    if (_input.text.length > maxLen) _input.text = [_input.text substringToIndex:maxLen];
+    if (_input.text.length == 0) {
+        _counter.hidden = YES;
+        _counter.text = @"0 / 500";
+    } else {
+        _counter.hidden = NO;
+        _counter.text = [NSString stringWithFormat:@"%lu / %lu", (unsigned long)_input.text.length, (unsigned long)maxLen];
+    }
+}
+
+- (void)updateLiveHudVisibility {
+    BOOL shouldShow = ([IOSDebAgent shared].isRunning && !_expanded && !_liveHudDismissedForRun && _window && !_window.hidden);
+    if (shouldShow) {
+        _liveHud.hidden = NO;
+        _liveHud.alpha = 1.0;
+    } else {
+        _liveHud.hidden = YES;
+    }
+}
+
+- (void)onDismissLiveHud {
+    _liveHudDismissedForRun = YES;
+    _liveHud.hidden = YES;
+}
+
+- (void)expandAndOpenLogs {
+    [self expand];
+    [self openLogDrawer];
+}
 
 - (void)expand {
     if (_expanded) return;
     _expanded = YES;
     _bar.hidden = YES;
     _panel.hidden = NO;
+    [self updateLiveHudVisibility];
     [self makeKeyForInput];
 
-    CGRect sup = _panel.superview.bounds;
-    CGFloat h = kPanelHeight;
-    _panel.frame = CGRectMake(12, sup.size.height - h - 12, sup.size.width - 24, h);
+    CGFloat h = _logDrawerOpen ? [self logPanelTargetHeight] : (!_skillContainer.hidden ? kSkillPanelHeight : kCompactPanelHeight);
+    [self resizePanelToHeight:h animated:NO];
+    [self updateInputCounter];
     [self updateTokenLabel];
 
     _panel.transform = CGAffineTransformMakeScale(0.92, 0.92);
@@ -1399,6 +1913,13 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     [_panel endEditing:YES];
     [_window endEditing:YES];
     _skillContainer.hidden = YES;
+    _skillDetailContainer.hidden = YES;
+    _skillEditContainer.hidden = YES;
+    _logContainer.hidden = YES;
+    _logDrawerOpen = NO;
+    [_logRefreshTimer invalidate];
+    _logRefreshTimer = nil;
+    _currentPanelHeight = kCompactPanelHeight;
 
     [UIView animateWithDuration:0.20 animations:^{
         self->_panel.transform = CGAffineTransformMakeScale(0.92, 0.92);
@@ -1415,6 +1936,7 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         } else {
             [self setBarToIdleState];
         }
+        [self updateLiveHudVisibility];
     }];
 }
 
@@ -1425,23 +1947,223 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     NSTimeInterval dur = [info[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
     BOOL showing = [note.name isEqualToString:UIKeyboardWillShowNotification];
 
-    CGRect sup = _panel.superview.bounds;
-    CGFloat h = _panel.bounds.size.height;
-    CGFloat bottomInset = showing ? CGRectGetHeight(kb) : 0;
-
+    _keyboardBottomInset = showing ? CGRectGetHeight(kb) : 0;
+    CGFloat targetH = _currentPanelHeight > 0 ? _currentPanelHeight : kCompactPanelHeight;
     [UIView animateWithDuration:dur animations:^{
-        self->_panel.frame = CGRectMake(12, sup.size.height - h - bottomInset - 12,
-                                        sup.size.width - 24, h);
+        [self resizePanelToHeight:targetH animated:NO];
     }];
+}
+
+#pragma mark - Log Center Drawer Actions
+
+- (NSArray<IOSDebAgentStep *> *)visibleSteps {
+    NSString *kw = [_logSearchKeyword stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (!_logOnlyAbnormal && kw.length == 0) {
+        return _steps;
+    }
+    NSMutableArray<IOSDebAgentStep *> *filtered = [NSMutableArray array];
+    for (IOSDebAgentStep *s in _steps) {
+        BOOL abnormal = !s.ok || [s.title isEqualToString:@"选择答案"];
+        if (_logOnlyAbnormal && !abnormal) continue;
+        if (kw.length > 0) {
+            BOOL match = ([s.title localizedCaseInsensitiveContainsString:kw] ||
+                          [s.detail localizedCaseInsensitiveContainsString:kw] ||
+                          [s.toolName localizedCaseInsensitiveContainsString:kw]);
+            if (!match) continue;
+        }
+        [filtered addObject:s];
+    }
+    return filtered;
+}
+
+- (void)refreshStepListUI {
+    NSArray<IOSDebAgentStep *> *items = [self visibleSteps];
+    [_table reloadData];
+    if (_logTabControl.selectedSegmentIndex == 0) {
+        _stepEmptyLabel.hidden = (items.count > 0);
+        if (items.count == 0) {
+            _stepEmptyLabel.text = _steps.count == 0
+                ? @"暂无执行步骤\n下达指令或运行技能后将在此显示轨迹"
+                : @"当前筛选条件下暂无匹配步骤";
+        }
+        _logFooterCount.text = [NSString stringWithFormat:@"显示 %lu / %lu 步",
+                                (unsigned long)items.count, (unsigned long)_steps.count];
+    }
+}
+
+- (void)reloadRawLogScrollToBottom:(BOOL)scrollToBottom {
+    BOOL onlyAbn = _logOnlyAbnormal;
+    NSString *kw = [_logSearchKeyword copy];
+    NSString *path = [IOSDebLogging logFilePath];
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSDictionary *res = IOSDebReadAndFormatLogTail(path, onlyAbn, kw);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            IOSDebFloatingPanel *self = weakSelf;
+            if (!self) return;
+            NSString *txt = res[@"text"];
+            self->_rawLogView.text = txt.length > 0
+                ? txt
+                : (onlyAbn || kw.length ? @"当前筛选条件下没有匹配的运行日志。" : @"暂无日志文件（执行任意任务后会自动生成）。");
+            if (self->_logTabControl.selectedSegmentIndex == 1) {
+                self->_logFooterCount.text = [NSString stringWithFormat:@"%lu / %lu 条 · %@ KB",
+                                              [res[@"shown"] unsignedLongValue],
+                                              [res[@"total"] unsignedLongValue],
+                                              res[@"kb"] ?: @0];
+            }
+            if (scrollToBottom && self->_rawLogView.text.length > 0) {
+                NSRange endRange = NSMakeRange(self->_rawLogView.text.length - 1, 1);
+                [self->_rawLogView scrollRangeToVisible:endRange];
+            }
+        });
+    });
+}
+
+- (void)openLogDrawer {
+    _logDrawerOpen = YES;
+    _skillContainer.hidden = YES;
+    _skillDetailContainer.hidden = YES;
+    _skillEditContainer.hidden = YES;
+    [_panel bringSubviewToFront:_logContainer];
+    _logContainer.alpha = 0.0;
+    _logContainer.hidden = NO;
+    [self resizePanelToHeight:[self logPanelTargetHeight] animated:YES];
+    [self updateTokenLabel];
+    [self refreshStepListUI];
+    if (_logTabControl.selectedSegmentIndex == 1) {
+        [self reloadRawLogScrollToBottom:YES];
+    }
+    [UIView animateWithDuration:0.25 animations:^{
+        self->_logContainer.alpha = 1.0;
+    }];
+
+    [_logRefreshTimer invalidate];
+    __weak typeof(self) weakSelf = self;
+    _logRefreshTimer = [NSTimer scheduledTimerWithTimeInterval:1.5 repeats:YES block:^(__unused NSTimer *t) {
+        IOSDebFloatingPanel *s = weakSelf;
+        if (!s || !s->_logDrawerOpen || s->_logContainer.hidden) return;
+        if (s->_logTabControl.selectedSegmentIndex == 1 && [IOSDebAgent shared].isRunning) {
+            [s reloadRawLogScrollToBottom:YES];
+        }
+    }];
+}
+
+- (void)closeLogDrawer {
+    _logDrawerOpen = NO;
+    [_logRefreshTimer invalidate];
+    _logRefreshTimer = nil;
+    [UIView animateWithDuration:0.20 animations:^{
+        self->_logContainer.alpha = 0.0;
+    } completion:^(__unused BOOL finished) {
+        self->_logContainer.hidden = YES;
+        [self resizePanelToHeight:kCompactPanelHeight animated:YES];
+    }];
+}
+
+- (void)onLogTabChanged {
+    BOOL showRaw = (_logTabControl.selectedSegmentIndex == 1);
+    _table.hidden = showRaw;
+    _stepEmptyLabel.hidden = showRaw || ([self visibleSteps].count > 0);
+    _rawLogView.hidden = !showRaw;
+    if (showRaw) {
+        [self reloadRawLogScrollToBottom:YES];
+    } else {
+        [self refreshStepListUI];
+    }
+}
+
+- (void)onLogFilterChanged {
+    _logOnlyAbnormal = (_logFilterControl.selectedSegmentIndex == 1);
+    if (_logTabControl.selectedSegmentIndex == 0) {
+        [self refreshStepListUI];
+    } else {
+        [self reloadRawLogScrollToBottom:YES];
+    }
+}
+
+- (void)onLogSearchTap {
+    if (_logSearchKeyword.length > 0) {
+        _logSearchKeyword = nil;
+        [_logSearchBtn setTitle:@"搜词" forState:UIControlStateNormal];
+        [self onLogFilterChanged];
+        return;
+    }
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"按关键词筛选日志"
+                                                                   message:@"输入英文词条、状态或错误信息关键词"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"如: coolant / 词库缺词 / Fast-Bypass";
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+        tf.clearButtonMode = UITextFieldViewModeWhileEditing;
+    }];
+    __weak typeof(self) weakSelf = self;
+    __weak typeof(alert) weakAlert = alert;
+    [alert addAction:[UIAlertAction actionWithTitle:@"筛选" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+        IOSDebFloatingPanel *self = weakSelf;
+        if (!self) return;
+        NSString *kw = [weakAlert.textFields.firstObject.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        self->_logSearchKeyword = kw.length > 0 ? kw : nil;
+        NSString *btnTitle = kw.length > 0 ? [NSString stringWithFormat:@"✕ %@", kw.length > 5 ? [kw substringToIndex:5] : kw] : @"搜词";
+        [self->_logSearchBtn setTitle:btnTitle forState:UIControlStateNormal];
+        [self onLogFilterChanged];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [[self topViewController] presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)onRefreshLogTap {
+    if (_logTabControl.selectedSegmentIndex == 0) {
+        [self refreshStepListUI];
+    } else {
+        [self reloadRawLogScrollToBottom:YES];
+    }
+}
+
+- (void)onCopyCurrentLogs {
+    NSString *copied = @"";
+    if (_logTabControl.selectedSegmentIndex == 1) {
+        copied = _rawLogView.text ?: @"";
+    } else {
+        NSMutableArray<NSString *> *lines = [NSMutableArray array];
+        for (IOSDebAgentStep *s in [self visibleSteps]) {
+            [lines addObject:[NSString stringWithFormat:@"#%ld [%@] %@ · %@ (%.1fs)",
+                              (long)s.index, s.toolName ?: @"", s.title ?: @"", s.detail ?: @"", s.duration]];
+        }
+        copied = [lines componentsJoinedByString:@"\n"];
+    }
+    if (copied.length > 0) {
+        [UIPasteboard generalPasteboard].string = copied;
+        [_logCopyBtn setTitle:@"✓ 已复制" forState:UIControlStateNormal];
+        __weak typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) s = weakSelf;
+            if (s) [s->_logCopyBtn setTitle:@"复制" forState:UIControlStateNormal];
+        });
+    }
+}
+
+- (void)onClearLogsTap {
+    if (_logTabControl.selectedSegmentIndex == 0) {
+        [_steps removeAllObjects];
+        [self refreshStepListUI];
+        return;
+    }
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"清空日志文件"
+                                                                   message:@"确认删除设备上的运行日志文件吗？"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"清空" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a) {
+        [IOSDebLogging clearAllLogs];
+        [weakSelf reloadRawLogScrollToBottom:NO];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [[self topViewController] presentViewController:alert animated:YES completion:nil];
 }
 
 #pragma mark - Input
 
 - (void)textViewDidChange:(UITextView *)tv {
-    BOOL isCode = [tv.text containsString:@"{"] || [tv.text containsString:@"\"name\""] || [tv.text containsString:@"loopSteps"] || [tv.text hasPrefix:@"agentos://"];
-    NSUInteger maxLen = isCode ? 10000 : 500;
-    if (tv.text.length > maxLen) tv.text = [tv.text substringToIndex:maxLen];
-    _counter.text = [NSString stringWithFormat:@"%lu / %lu", (unsigned long)tv.text.length, (unsigned long)maxLen];
+    [self updateInputCounter];
 }
 
 - (BOOL)textView:(UITextView *)tv shouldChangeTextInRange:(NSRange)range
@@ -1464,13 +2186,13 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     IOSDebSkill *skill = [IOSDebSkill fromJSONString:text];
     if (skill && skill.name.length > 0) {
         _input.text = @"";
-        _counter.text = @"0 / 500";
+        [self updateInputCounter];
         [_input resignFirstResponder];
         [_panel endEditing:YES];
         [[IOSDebSkillStore shared] save:skill];
         [self reloadSkillChips];
         [self setStatus:[NSString stringWithFormat:@"已成功导入「%@」！", skill.name]
-                  color:[UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1]];
+                  color:IOSDebAccentMint()];
         [self showSimpleAlert:@"导入成功"
                       message:[NSString stringWithFormat:@"已成功导入技能「%@」(v%ld)！\n已收录至「⚡ 技能库」中，可随时点击执行。", skill.name, (long)skill.version]];
         if (@available(iOS 10.0, *)) {
@@ -1487,7 +2209,7 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         [lower isEqualToString:@"屏幕翻译"] || [lower isEqualToString:@"translate"] ||
         [lower isEqualToString:@"translate screen"]) {
         _input.text = @"";
-        _counter.text = @"0 / 500";
+        [self updateInputCounter];
         [_input resignFirstResponder];
         [_panel endEditing:YES];
         [self onTriggerFullScreenTranslation];
@@ -1504,11 +2226,12 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     }
 
     [_steps removeAllObjects];
-    [_table reloadData];
+    [self refreshStepListUI];
     _input.text = @"";
-    _counter.text = @"0 / 500";
+    [self updateInputCounter];
     _taskStartTime = [NSDate date];
     _activeSkillTargetRounds = 0;
+    _liveHudDismissedForRun = NO;
     [self setRunningUI:YES];
     [self setStatus:@"正在执行…" color:[UIColor colorWithRed:0.431 green:0.659 blue:1 alpha:1]];
 
@@ -1671,13 +2394,15 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     if (running) {
         [self setBarToRunningState];
     }
+    [self updateLiveHudVisibility];
 }
 
 - (void)setStatus:(NSString *)text color:(UIColor *)color {
     _statusLabel.text = text;
-    _statusLabel.textColor = color;
-    _statusLabel.frame = CGRectMake(14, 172, _panel.bounds.size.width - 28, 16);
-    _table.frame = CGRectMake(0, 190, _panel.bounds.size.width - 24, 118);
+    _statusLabel.textColor = color ?: [UIColor colorWithWhite:1 alpha:0.78];
+    if (_summaryDot) {
+        _summaryDot.backgroundColor = color ?: IOSDebAccentMint();
+    }
 }
 
 - (void)updateTokenLabel {
@@ -1686,20 +2411,14 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         _tokenLabel.text = [NSString stringWithFormat:@"Token %ld · 上限 %ld 步",
                             (long)a.tokenUsage, (long)a.stepLimit];
     }
-    if (_tokenBadge) {
-        if (a.tokenUsage >= 1000) {
-            _tokenBadge.text = [NSString stringWithFormat:@"💎 %.1fk Tok", a.tokenUsage / 1000.0];
-        } else {
-            _tokenBadge.text = [NSString stringWithFormat:@"💎 %ld Tok", (long)a.tokenUsage];
-        }
-    }
-    if (_stepBadge) {
-        _stepBadge.text = [NSString stringWithFormat:@"🎯 步数 %ld/%ld", (long)a.currentStep, (long)a.stepLimit];
-    }
-    if (_timeBadge) {
-        NSTimeInterval elapsed = _taskStartTime ? -[_taskStartTime timeIntervalSinceNow] : 0;
-        _timeBadge.text = [NSString stringWithFormat:@"⏱ 耗时 %.1fs", elapsed];
-    }
+    NSString *tokStr = a.tokenUsage >= 1000
+        ? [NSString stringWithFormat:@"💎 %.1fk Tok", a.tokenUsage / 1000.0]
+        : [NSString stringWithFormat:@"💎 %ld Tok", (long)a.tokenUsage];
+    NSTimeInterval elapsed = _taskStartTime ? -[_taskStartTime timeIntervalSinceNow] : 0;
+    NSString *compactMeta = [NSString stringWithFormat:@"步骤 %ld/%ld · %@ · ⏱ %.1fs",
+                             (long)a.currentStep, (long)a.stepLimit, tokStr, elapsed];
+    if (_summaryMetaLabel) _summaryMetaLabel.text = compactMeta;
+    if (_logFooterMetrics) _logFooterMetrics.text = compactMeta;
 }
 
 #pragma mark - Agent events
@@ -1708,14 +2427,13 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
                step:(IOSDebAgentStep *)step message:(NSString *)message {
     if ([event isEqualToString:IOSDebAgentEventStep]) {
         if (step) {
-            // Replace the placeholder row for the same index if present.
             NSUInteger idx = step.index - 1;
             if (idx < _steps.count) _steps[idx] = step;
             else [_steps addObject:step];
-            [_table reloadData];
-            if (_steps.count) {
-                [_table scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:_steps.count - 1
-                                                                inSection:0]
+            [self refreshStepListUI];
+            NSArray<IOSDebAgentStep *> *vis = [self visibleSteps];
+            if (!_table.hidden && vis.count > 0) {
+                [_table scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:vis.count - 1 inSection:0]
                               atScrollPosition:UITableViewScrollPositionBottom animated:YES];
             }
             if (_activeSkillTargetRounds > 0) {
@@ -1724,6 +2442,20 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
                 _barLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightBold];
                 _barLabel.text = [NSString stringWithFormat:@"%ld/%ld", (long)estDone, (long)_activeSkillTargetRounds];
             }
+            NSString *progressPrefix = _activeSkillTargetRounds > 0
+                ? [NSString stringWithFormat:@"[%ld/%ld] ", (long)agent.completedRounds, (long)_activeSkillTargetRounds]
+                : [NSString stringWithFormat:@"[#%ld] ", (long)step.index];
+            NSString *liveLine = step.detail.length > 0
+                ? [NSString stringWithFormat:@"%@%@ · %@", progressPrefix, step.title ?: @"", step.detail]
+                : [NSString stringWithFormat:@"%@%@", progressPrefix, step.title ?: @"执行中…"];
+            if (_liveHudLabel) {
+                _liveHudLabel.text = liveLine;
+                _liveHudDot.backgroundColor = [step.title isEqualToString:@"词库直切"]
+                    ? IOSDebAccentMint()
+                    : (step.duration > 0 && !step.ok ? [UIColor orangeColor] : IOSDebAccentSky());
+            }
+            [self setStatus:liveLine color:(step.duration > 0 && !step.ok ? [UIColor orangeColor] : IOSDebAccentSky())];
+
             if (step.duration > 0 && step.ok &&
                 [@[@"update_skill", @"create_skill", @"delete_skill"] containsObject:step.toolName ?: @""]) {
                 [self reloadSkillChips];
@@ -1761,9 +2493,12 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         }
     }
 
-    [self setStatus:finalStatus color:(ok ? [UIColor colorWithRed:0.184 green:0.831 blue:0.655 alpha:1]
+    [self setStatus:finalStatus color:(ok ? IOSDebAccentMint()
                                           : [UIColor colorWithRed:0.898 green:0.329 blue:0.294 alpha:1])];
     [self updateTokenLabel];
+    if (_logDrawerOpen && _logTabControl.selectedSegmentIndex == 1) {
+        [self reloadRawLogScrollToBottom:YES];
+    }
 
     if (ok) {
         [self setBarToCompletedState];
@@ -1779,9 +2514,14 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
 - (void)openSkillLibrary {
     [[IOSDebSkillStore shared] reload];
     [self reloadSkillChips];
+    _logDrawerOpen = NO;
+    _logContainer.hidden = YES;
+    [_logRefreshTimer invalidate];
+    _logRefreshTimer = nil;
     [_panel bringSubviewToFront:_skillContainer];
     _skillContainer.alpha = 0.0;
     _skillContainer.hidden = NO;
+    [self resizePanelToHeight:kSkillPanelHeight animated:YES];
     [UIView animateWithDuration:0.25 animations:^{
         self->_skillContainer.alpha = 1.0;
     }];
@@ -1797,6 +2537,7 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
         self->_skillDetailContainer.hidden = YES;
         self->_skillEditContainer.hidden = YES;
         [self updateSkillLibButtonTitle];
+        [self resizePanelToHeight:kCompactPanelHeight animated:YES];
     }];
 }
 
@@ -2086,8 +2827,13 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     _activeSkill = skill;
     _taskStartTime = [NSDate date];
     _activeSkillTargetRounds = rounds;
+    _liveHudDismissedForRun = NO;
     [_steps removeAllObjects];
-    [_table reloadData];
+    [self refreshStepListUI];
+    if (_liveHudLabel) {
+        _liveHudLabel.text = [NSString stringWithFormat:@"启动「%@」(%ld轮)…", skill.name ?: @"技能", (long)rounds];
+        _liveHudDot.backgroundColor = IOSDebAccentSky();
+    }
     [self setRunningUI:YES];
     [self setStatus:[NSString stringWithFormat:@"执行技能「%@」(%ld轮)…", skill.name, (long)rounds]
               color:[UIColor colorWithRed:0.431 green:0.659 blue:1 alpha:1]];
@@ -2281,7 +3027,7 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     if (tv == _skillTable) {
         return (NSInteger)[[IOSDebSkillStore shared] allSkills].count;
     }
-    return (NSInteger)_steps.count;
+    return (NSInteger)[self visibleSteps].count;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
@@ -2317,8 +3063,11 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
     }
 
     IOSDebStepCell *cell = [tv dequeueReusableCellWithIdentifier:@"step" forIndexPath:ip];
-    [cell configureWithStep:_steps[(NSUInteger)ip.row]
-                    running:[IOSDebAgent shared].isRunning];
+    NSArray<IOSDebAgentStep *> *items = [self visibleSteps];
+    if ((NSUInteger)ip.row < items.count) {
+        [cell configureWithStep:items[(NSUInteger)ip.row]
+                        running:[IOSDebAgent shared].isRunning];
+    }
     return cell;
 }
 
@@ -2329,6 +3078,24 @@ static void IOSDebOwnDescriptors(UIView *view, NSMutableArray *items) {
             IOSDebSkill *skill = skills[(NSUInteger)ip.row];
             [self presentSkillInspectorForSkill:skill];
         }
+        return;
+    }
+    NSArray<IOSDebAgentStep *> *items = [self visibleSteps];
+    if ((NSUInteger)ip.row < items.count) {
+        IOSDebAgentStep *step = items[(NSUInteger)ip.row];
+        NSString *msg = [NSString stringWithFormat:@"工具：%@\n耗时：%.2fs · 状态：%@\n\n%@",
+                         step.toolName ?: @"(无)",
+                         step.duration,
+                         (step.duration > 0 ? (step.ok ? @"成功" : @"异常") : @"进行中"),
+                         step.detail ?: @"(无详细参数)"];
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"#%ld %@", (long)step.index, step.title ?: @"步骤详情"]
+                                                                       message:msg
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"复制详情" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+            [UIPasteboard generalPasteboard].string = msg;
+        }]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleCancel handler:nil]];
+        [[self topViewController] presentViewController:alert animated:YES completion:nil];
     }
 }
 
