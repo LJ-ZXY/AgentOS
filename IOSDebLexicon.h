@@ -31,20 +31,33 @@ typedef NS_ENUM(NSInteger, IOSDebQuizPagePhase) {
     IOSDebQuizPageTransition
 };
 
+typedef NS_ENUM(NSInteger, IOSDebQuizDirection) {
+    IOSDebQuizDirectionEnglishToChinese = 0, // 看英文选中文
+    IOSDebQuizDirectionChineseToEnglish = 1  // 看中文语义选英文单词
+};
+
 /// One recognised multiple-choice question on screen. Used to tell whether
 /// answering a word actually advanced to a new question.
 @interface IOSDebQuizFingerprint : NSObject
+@property (nonatomic, assign) IOSDebQuizDirection direction;
 @property (nonatomic, copy) NSString *rawEnglishWord;
-@property (nonatomic, copy) NSString *englishWord;     // 目标英文词
-@property (nonatomic, copy) NSArray<NSString *> *optionTexts; // 中文选项集合（按屏幕顺序）
+@property (nonatomic, copy) NSString *englishWord;     // EN->ZH: 目标英文词；ZH->EN: 规范化中文题干关键语义
+@property (nonatomic, copy) NSString *chinesePrompt;   // ZH->EN 题干中文提示（EN->ZH 为空）
+@property (nonatomic, copy) NSArray<NSString *> *optionTexts; // 选项集合（按屏幕顺序）
 @property (nonatomic, copy) NSArray<NSDictionary *> *optionElements;
-@property (nonatomic, copy) NSString *signature;       // 词 + 选项的稳定指纹
+@property (nonatomic, copy) NSString *signature;       // 题干 + 选项的稳定指纹
+@property (nonatomic, assign) BOOL examMode;           // 计时测验/选择题界面（题目 X / Y，无即时对错反馈）
+@property (nonatomic, assign) NSInteger questionIndex; // 题目序号（未知为 0）
+@property (nonatomic, assign) NSInteger questionTotal; // 总题数（未知为 0）
 @property (nonatomic, assign) BOOL hasNextButton;      // 是否存在「下一题」
 @property (nonatomic, assign) CGPoint nextButtonPoint; // 「下一题」中心坐标
 @end
 
 @interface IOSDebQuizObservation : NSObject
 @property (nonatomic, assign) IOSDebQuizPagePhase phase;
+@property (nonatomic, assign) BOOL examMode;
+@property (nonatomic, assign) NSInteger questionIndex;
+@property (nonatomic, assign) NSInteger questionTotal;
 @property (nonatomic, strong, nullable) IOSDebQuizFingerprint *fingerprint;
 @property (nonatomic, strong, nullable) IOSDebQuizFingerprint *identityFingerprint;
 @property (nonatomic, copy) NSString *observedWord;
@@ -58,14 +71,20 @@ typedef NS_ENUM(NSInteger, IOSDebQuizPagePhase) {
 
 + (instancetype)shared;
 + (BOOL)isNextButtonText:(NSString *)text;
++ (BOOL)isQuizChromeText:(NSString *)text;
++ (nullable NSString *)extractChinesePromptCue:(NSString *)text;
 + (NSArray<NSDictionary *> *)filterElements:(NSArray<NSDictionary *> *)elements
                        overlayDescriptors:(NSArray<NSDictionary *> *)descriptors;
 
 - (BOOL)isLoaded;
 - (void)preloadIfNeeded;
+- (BOOL)loadFromFile:(NSString *)path;
 
 /// 查询单个单词/短语的中文释义列表
 - (nullable NSArray<NSString *> *)lookupMeaningsForWord:(NSString *)word;
+
+/// 针对“看中文选英文”场景，评估中文题干与英文选项释义的语义匹配度
+- (double)scoreChinesePrompt:(NSString *)prompt againstMeanings:(NSArray<NSString *> *)meanings;
 
 /// 词形还原（如 running -> run, shoes -> shoe）
 - (NSString *)lemmatizeWord:(NSString *)word;

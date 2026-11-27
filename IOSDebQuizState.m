@@ -91,6 +91,14 @@
     return nil;
 }
 - (void)acknowledgeOption:(BOOL)ok { _tapAcknowledged = ok; }
+- (void)confirmSettledSelectionIfExamMode {
+    if (_optionSent && _tapAcknowledged) _answerEvidence = YES;
+}
+- (BOOL)completeFinalQuestionWithoutNext {
+    if (!_optionSent || !_tapAcknowledged || _roundCounted || _entryRecovery) return NO;
+    _completedRounds++; _roundCounted = YES;
+    return YES;
+}
 - (BOOL)countFinalResult {
     if (!_tapAcknowledged || !_explicitFeedback || _roundCounted || _entryRecovery) return NO;
     _completedRounds++; _roundCounted = YES;

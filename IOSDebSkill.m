@@ -200,7 +200,7 @@ static NSArray<NSString *> *IOSDebSkillStrings(id value) {
     [out appendString:@"【极速执行规范（重要）】：\n"];
     [out appendString:@"1. 系统已自动附上当前屏幕的所有可见文本及中心点击坐标 @(x,y)，并在每次点击动作后自动刷新下一屏的文本与坐标随结果返回。\n"];
     [out appendString:@"2. 严禁单独调用 describe_screen 浪费往返耗时！看到题目后直接调用 tap_element(text) 或 tap_screen(x,y) 点击正确选项。\n"];
-    [out appendString:@"3. 答对后通常会自动切题，直接作答新题即可；只有确认屏幕仍停留在同一个英文单词、且等待后仍未切题时，才点一次「下一题 ▶」，每轮最多点一次。\n"];
+    [out appendString:@"3. 点击匹配选项后如页面自动切题，直接作答新题即可；如等待后仍停留在同一题（包括计时测验模式与看中文选英文题型），由系统或单次点击「下一题」推进，每轮最多点一次。\n"];
     [out appendString:@"4. 执行中途不要输出长篇过程报告，全速连续推进，全部完成或触发停止条件时再一次性简短汇报。"];
     return out;
 }

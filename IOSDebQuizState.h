@@ -27,6 +27,8 @@ typedef NS_ENUM(NSInteger, IOSDebQuizPageRelation) {
 - (BOOL)observe:(IOSDebQuizFingerprint *)fingerprint feedback:(NSString *)feedback selected:(BOOL)selected;
 - (NSString *)beginOption:(NSString *)option;
 - (void)acknowledgeOption:(BOOL)ok;
+- (void)confirmSettledSelectionIfExamMode;
+- (BOOL)completeFinalQuestionWithoutNext;
 - (BOOL)countFinalResult;
 - (NSString *)reserveNextAfterWait:(BOOL)waited hasButton:(BOOL)hasButton;
 - (void)beginEntryRecovery:(IOSDebQuizFingerprint *)fingerprint;

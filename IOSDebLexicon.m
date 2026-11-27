@@ -71,6 +71,31 @@ static NSString *IOSDebResolveLexiconPath(void) {
     return candidates.firstObject;
 }
 
+- (BOOL)loadFromFile:(NSString *)path {
+    if (!path.length) return NO;
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (!data.length) {
+        IOSDebLog(@"[lexicon] file not found at %@", path);
+        return NO;
+    }
+    NSError *err = nil;
+    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&err];
+    if (![json isKindOfClass:[NSDictionary class]] || err) {
+        IOSDebLog(@"[lexicon] failed to parse JSON at %@: %@", path, err);
+        return NO;
+    }
+    __block BOOL loaded = NO;
+    dispatch_sync(_queue, ^{
+        self->_words = json[@"words"];
+        self->_lemmas = json[@"lemmas"];
+        self->_loaded = (self->_words.count > 0);
+        loaded = self->_loaded;
+    });
+    IOSDebLog(@"[lexicon] loaded %lu words, %lu lemmas from %@",
+              (unsigned long)self->_words.count, (unsigned long)self->_lemmas.count, path);
+    return loaded;
+}
+
 - (void)preloadIfNeeded {
     dispatch_async(_queue, ^{
         if (self->_loaded) return;
@@ -228,26 +253,81 @@ static NSSet<NSString *> *IOSDebStopwords(void) {
     return set;
 }
 
+static NSSet<NSString *> *IOSDebMeaningChars(NSString *text) {
+    NSMutableSet<NSString *> *chars = [NSMutableSet set];
+    NSSet *stops = IOSDebStopwords();
+    NSCharacterSet *alphaNum = [NSCharacterSet alphanumericCharacterSet];
+    for (NSUInteger i = 0; i < text.length; i++) {
+        NSString *ch = [[text substringWithRange:NSMakeRange(i, 1)] lowercaseString];
+        if (![stops containsObject:ch] && [ch rangeOfCharacterFromSet:alphaNum].location != NSNotFound) {
+            [chars addObject:ch];
+        }
+    }
+    return chars;
+}
+
+static NSString *IOSDebNormalizeChineseClause(NSString *text) {
+    NSCharacterSet *trimSet = [NSCharacterSet whitespaceAndNewlineCharacterSet];
+    NSString *clean = [text stringByTrimmingCharactersInSet:trimSet];
+    clean = [clean stringByReplacingOccurrencesOfString:@"，" withString:@","];
+    clean = [clean stringByReplacingOccurrencesOfString:@"；" withString:@";"];
+    clean = [clean stringByReplacingOccurrencesOfString:@"（" withString:@"("];
+    clean = [clean stringByReplacingOccurrencesOfString:@"）" withString:@")"];
+    // Normalize legacy simplified-Chinese orthographic variants purely for matching.
+    clean = [clean stringByReplacingOccurrencesOfString:@"帐" withString:@"账"];
+    clean = [clean stringByReplacingOccurrencesOfString:@"定货" withString:@"订货"];
+    clean = [clean stringByReplacingOccurrencesOfString:@"定购" withString:@"订购"];
+    clean = [clean stringByReplacingOccurrencesOfString:@"预定" withString:@"预订"];
+    clean = [clean stringByReplacingOccurrencesOfString:@"时侯" withString:@"时候"];
+    clean = [clean stringByReplacingOccurrencesOfString:@"守侯" withString:@"守候"];
+    return [clean stringByTrimmingCharactersInSet:trimSet];
+}
+
+static NSArray<NSString *> *IOSDebChineseClauses(NSString *prompt) {
+    NSString *norm = IOSDebNormalizeChineseClause(prompt ?: @"");
+    if (!norm.length) return @[];
+    NSMutableArray<NSString *> *out = [NSMutableArray array];
+    void (^addUnique)(NSString *) = ^(NSString *s) {
+        NSString *t = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (t.length > 0 && ![out containsObject:t]) [out addObject:t];
+    };
+    addUnique(norm);
+
+    static NSRegularExpression *parenRegex;
+    static NSRegularExpression *splitRegex;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        parenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\([^)]*\\)" options:0 error:nil];
+        splitRegex = [NSRegularExpression regularExpressionWithPattern:@"[;,、/]+" options:0 error:nil];
+    });
+    NSString *noParen = [parenRegex stringByReplacingMatchesInString:norm options:0 range:NSMakeRange(0, norm.length) withTemplate:@""];
+    addUnique(noParen);
+
+    for (NSString *base in @[norm, noParen]) {
+        NSString *spaced = [splitRegex stringByReplacingMatchesInString:base options:0 range:NSMakeRange(0, base.length) withTemplate:@"\n"];
+        for (NSString *part in [spaced componentsSeparatedByString:@"\n"]) {
+            addUnique(part);
+            NSString *trimmed = [part stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (trimmed.length >= 2 && ([trimmed hasSuffix:@"的"] || [trimmed hasSuffix:@"地"] || [trimmed hasSuffix:@"了"])) {
+                addUnique([trimmed substringToIndex:trimmed.length - 1]);
+            }
+        }
+    }
+    return out;
+}
+
 - (double)scoreOption:(NSString *)option againstMeanings:(NSArray<NSString *> *)meanings {
     if (!option.length || meanings.count == 0) return 0.0;
 
-    NSCharacterSet *trimSet = [NSCharacterSet whitespaceAndNewlineCharacterSet];
-    NSString *cleanOpt = [option stringByTrimmingCharactersInSet:trimSet];
-    // Remove outer brackets/punctuation
-    cleanOpt = [cleanOpt stringByReplacingOccurrencesOfString:@"，" withString:@","];
+    NSString *cleanOpt = IOSDebNormalizeChineseClause(option);
+    if (!cleanOpt.length) return 0.0;
 
     double best = 0.0;
-    NSMutableSet<NSString *> *optChars = [NSMutableSet set];
-    NSSet *stops = IOSDebStopwords();
-    for (NSUInteger i = 0; i < cleanOpt.length; i++) {
-        NSString *ch = [cleanOpt substringWithRange:NSMakeRange(i, 1)];
-        if (![stops containsObject:ch] && [ch rangeOfCharacterFromSet:[NSCharacterSet letterCharacterSet]].location != NSNotFound) {
-            [optChars addObject:ch];
-        }
-    }
+    NSSet<NSString *> *optChars = IOSDebMeaningChars(cleanOpt);
 
     for (NSString *m in meanings) {
-        NSString *cleanM = [m stringByTrimmingCharactersInSet:trimSet];
+        NSString *cleanM = IOSDebNormalizeChineseClause(m);
+        if (!cleanM.length) continue;
         if ([cleanOpt isEqualToString:cleanM]) return 1.0;
 
         if ([cleanOpt containsString:cleanM]) {
@@ -255,18 +335,79 @@ static NSSet<NSString *> *IOSDebStopwords(void) {
         } else if ([cleanM containsString:cleanOpt]) {
             best = MAX(best, 0.90);
         } else {
-            NSMutableSet<NSString *> *mChars = [NSMutableSet set];
-            for (NSUInteger i = 0; i < cleanM.length; i++) {
-                NSString *ch = [cleanM substringWithRange:NSMakeRange(i, 1)];
-                if (![stops containsObject:ch] && [ch rangeOfCharacterFromSet:[NSCharacterSet letterCharacterSet]].location != NSNotFound) {
-                    [mChars addObject:ch];
-                }
-            }
+            NSSet<NSString *> *mChars = IOSDebMeaningChars(cleanM);
             NSMutableSet *intersection = [optChars mutableCopy];
             [intersection intersectSet:mChars];
             NSUInteger overlap = intersection.count;
             if (overlap >= 2) {
                 best = MAX(best, 0.75 + MIN((double)(overlap - 2) * 0.03, 0.09));
+            }
+        }
+    }
+    return best;
+}
+
+- (double)scoreChinesePrompt:(NSString *)prompt againstMeanings:(NSArray<NSString *> *)meanings {
+    if (!prompt.length || meanings.count == 0) return 0.0;
+    NSArray<NSString *> *clauses = IOSDebChineseClauses(prompt);
+    if (clauses.count == 0) return 0.0;
+    NSString *fullPrompt = clauses.firstObject;
+
+    static NSRegularExpression *parenRegex;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        parenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\([^)]*\\)" options:0 error:nil];
+    });
+
+    double best = 0.0;
+    for (NSString *rawM in meanings) {
+        NSString *cleanM = IOSDebNormalizeChineseClause(rawM);
+        if (!cleanM.length) continue;
+        NSString *strippedM = [[parenRegex stringByReplacingMatchesInString:cleanM options:0 range:NSMakeRange(0, cleanM.length) withTemplate:@""]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if ([fullPrompt isEqualToString:cleanM] || (strippedM.length && [fullPrompt isEqualToString:strippedM])) {
+            return 1.0;
+        }
+
+        NSMutableArray<NSString *> *mVariants = [NSMutableArray arrayWithObject:cleanM];
+        if (strippedM.length && ![strippedM isEqualToString:cleanM]) [mVariants addObject:strippedM];
+        if (cleanM.length >= 2 && ([cleanM hasSuffix:@"的"] || [cleanM hasSuffix:@"地"] || [cleanM hasSuffix:@"了"])) {
+            [mVariants addObject:[cleanM substringToIndex:cleanM.length - 1]];
+        }
+
+        for (NSString *clause in clauses) {
+            NSSet<NSString *> *clauseChars = IOSDebMeaningChars(clause);
+            for (NSString *mVar in mVariants) {
+                if (!mVar.length) continue;
+                if ([clause isEqualToString:mVar]) {
+                    best = MAX(best, [clause isEqualToString:fullPrompt] ? 1.0 : 0.97);
+                    continue;
+                }
+                if (mVar.length >= 2 && [clause containsString:mVar]) {
+                    double ratio = (double)mVar.length / (double)MAX(1, clause.length);
+                    best = MAX(best, 0.90 + 0.07 * MIN(1.0, ratio));
+                } else if (clause.length >= 2 && [mVar containsString:clause]) {
+                    double ratio = (double)clause.length / (double)MAX(1, mVar.length);
+                    best = MAX(best, 0.88 + 0.07 * MIN(1.0, ratio));
+                } else {
+                    NSSet<NSString *> *mChars = IOSDebMeaningChars(mVar);
+                    NSMutableSet *intersection = [clauseChars mutableCopy];
+                    [intersection intersectSet:mChars];
+                    NSUInteger overlap = intersection.count;
+                    if (overlap >= 2) {
+                        NSUInteger minLen = MIN(clauseChars.count, mChars.count);
+                        NSUInteger unionLen = MAX((NSUInteger)1, clauseChars.count + mChars.count - overlap);
+                        double coverage = (double)overlap / (double)MAX((NSUInteger)1, minLen);
+                        double jaccard = (double)overlap / (double)unionLen;
+                        if (coverage >= 0.50) {
+                            best = MAX(best, 0.75 + MIN(0.12, jaccard * 0.14));
+                        } else if (overlap >= 3) {
+                            best = MAX(best, 0.75 + MIN(0.08, (double)(overlap - 3) * 0.02));
+                        } else {
+                            best = MAX(best, 0.55);
+                        }
+                    }
+                }
             }
         }
     }
@@ -363,9 +504,115 @@ static NSSet *IOSDebIgnoredQuizTexts(void) {
             @"上一题", @"下一题", @"◀ 上一题", @"下一题 ▶", @"学习", @"自测", @"打卡", @"我的",
             @"日常词汇", @"练习词库", @"今日学习", @"单词斩", @"语法", @"跟读", @"AI对练",
             @"正确", @"错误", @"回答正确", @"回答错误", @"你的选择", @"英语学习",
+            @"提交", @"立即提交", @"交卷", @"提交答案", @"确认提交", @"提交试卷",
+            @"选择题", @"单选题", @"多选题", @"判断题", @"填空题",
             @"太棒了", @"恭喜", @"继续", @"跳过", @"提示", nil];
     });
     return ignoredTexts;
+}
+
++ (BOOL)isSubmitButtonText:(NSString *)text {
+    if (![text isKindOfClass:NSString.class]) return NO;
+    NSString *t = [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return [@[@"提交", @"立即提交", @"交卷", @"提交答案", @"确认提交", @"提交试卷"] containsObject:t];
+}
+
++ (BOOL)parseExamProgressText:(NSString *)text index:(NSInteger *)outIdx total:(NSInteger *)outTotal {
+    if (![text isKindOfClass:NSString.class] || text.length == 0) return NO;
+    static NSRegularExpression *progRegex;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        progRegex = [NSRegularExpression regularExpressionWithPattern:@"^(?:题目|第)\\s*(\\d+)\\s*/\\s*(\\d+)" options:0 error:nil];
+    });
+    NSString *t = [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSTextCheckingResult *m = [progRegex firstMatchInString:t options:0 range:NSMakeRange(0, t.length)];
+    if (!m || m.numberOfRanges < 3) return NO;
+    if (outIdx) *outIdx = [[t substringWithRange:[m rangeAtIndex:1]] integerValue];
+    if (outTotal) *outTotal = [[t substringWithRange:[m rangeAtIndex:2]] integerValue];
+    return YES;
+}
+
++ (BOOL)isQuizChromeText:(NSString *)text {
+    if (![text isKindOfClass:NSString.class]) return NO;
+    NSString *t = [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (t.length == 0) return YES;
+    if ([IOSDebLexicon isNextButtonText:t] || [IOSDebLexicon isSubmitButtonText:t]) return YES;
+    if ([t containsString:@"上一题"] || [t containsString:@"距截止"] || [t containsString:@"自动提交"] ||
+        [t containsString:@"未答题目"] || [t containsString:@"剩余时间"] || [t containsString:@"剩余答题时间"] ||
+        [t containsString:@"正确答案"] || [t containsString:@"记忆解析"] || [t containsString:@"词根拆解"] ||
+        [t containsString:@"你的选择"] || [t containsString:@"已学"] || [t containsString:@"/ 30"] || [t containsString:@"/ 10"]) {
+        return YES;
+    }
+    if ([IOSDebLexicon parseExamProgressText:t index:NULL total:NULL]) return YES;
+    if ([t rangeOfString:@"^[^\\u4e00-\\u9fa5A-Za-z0-9]*(?:选择题|单选题|多选题|判断题|填空题)\\s*$" options:NSRegularExpressionSearch].location != NSNotFound) {
+        return YES;
+    }
+    if ([t isEqualToString:@"英语学习"] || [t isEqualToString:@"返回"] || [t isEqualToString:@"更多"] ||
+        [t isEqualToString:@"关闭"] || [t isEqualToString:@"日常词汇"] || [t isEqualToString:@"练习词库"]) {
+        return YES;
+    }
+    if ([IOSDebIgnoredQuizTexts() containsObject:t] &&
+        [t rangeOfString:@"[\\u4e00-\\u9fa5]" options:NSRegularExpressionSearch].location == NSNotFound) {
+        return YES;
+    }
+    return NO;
+}
+
++ (nullable NSString *)extractChinesePromptCue:(NSString *)text {
+    if (![text isKindOfClass:NSString.class]) return nil;
+    NSString *t = [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (t.length == 0) return nil;
+
+    BOOL hasPromptHint = ([t containsString:@"请选择"] || [t containsString:@"请选出"] ||
+                          [t containsString:@"对应"] || [t containsString:@"英文"] ||
+                          [t containsString:@"单词"] || [t containsString:@"选出"]);
+    if (!hasPromptHint) return nil;
+
+    static NSRegularExpression *quotedRegex;
+    static NSRegularExpression *unquotedRegex;
+    static NSRegularExpression *cjkRegex;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        quotedRegex = [NSRegularExpression regularExpressionWithPattern:@"[\"“'‘「『]([^\"”'’」』]{1,60})[\"”'’」』]" options:0 error:nil];
+        unquotedRegex = [NSRegularExpression regularExpressionWithPattern:@"^(?:请选择|请选出)?\\s*(.+?)\\s*(?:对应的?(?:英文(?:单词|词组|表达)?|单词)|的英文(?:单词|词组|表达)?)$" options:0 error:nil];
+        cjkRegex = [NSRegularExpression regularExpressionWithPattern:@"[\\u4e00-\\u9fa5]" options:0 error:nil];
+    });
+
+    NSString *extracted = nil;
+    NSTextCheckingResult *qm = [quotedRegex firstMatchInString:t options:0 range:NSMakeRange(0, t.length)];
+    if (qm && qm.numberOfRanges >= 2) {
+        extracted = [t substringWithRange:[qm rangeAtIndex:1]];
+    } else {
+        NSTextCheckingResult *um = [unquotedRegex firstMatchInString:t options:0 range:NSMakeRange(0, t.length)];
+        if (um && um.numberOfRanges >= 2) {
+            extracted = [t substringWithRange:[um rangeAtIndex:1]];
+        }
+    }
+    extracted = [extracted stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (!extracted.length) return nil;
+    if ([cjkRegex firstMatchInString:extracted options:0 range:NSMakeRange(0, extracted.length)] == nil) {
+        return nil;
+    }
+    return extracted;
+}
+
+static BOOL IOSDebElementsAreAlignedOptions(NSArray<NSDictionary *> *items, double leftTol, double centerTol) {
+    if (items.count != 4) return NO;
+    double minX = DBL_MAX, maxX = -DBL_MAX;
+    double minCX = DBL_MAX, maxCX = -DBL_MAX;
+    double prevY = -DBL_MAX;
+    for (NSDictionary *el in items) {
+        NSDictionary *r = el[@"rect"];
+        double x = [r[@"x"] doubleValue];
+        double y = [r[@"y"] doubleValue];
+        double w = [r[@"width"] doubleValue];
+        double cx = x + w / 2.0;
+        if (y <= prevY) return NO;
+        prevY = y;
+        minX = MIN(minX, x); maxX = MAX(maxX, x);
+        minCX = MIN(minCX, cx); maxCX = MAX(maxCX, cx);
+    }
+    return ((maxX - minX) <= leftTol) || ((maxCX - minCX) <= centerTol);
 }
 
 - (nullable IOSDebBypassMatch *)evaluateWordMeaningMatchOnElements:(NSArray<NSDictionary *> *)elements {
@@ -376,7 +623,7 @@ static NSSet *IOSDebIgnoredQuizTexts(void) {
         if (![el[@"text"] isEqual:decision[@"winner"]]) continue;
         NSDictionary *r = el[@"rect"];
         IOSDebBypassMatch *match = [IOSDebBypassMatch new];
-        match.englishWord = fp.rawEnglishWord;
+        match.englishWord = fp.englishWord;
         match.matchedOptionText = el[@"text"];
         match.optionPoint = CGPointMake([r[@"x"] doubleValue] + [r[@"width"] doubleValue]/2,
                                        [r[@"y"] doubleValue] + [r[@"height"] doubleValue]/2);
@@ -398,36 +645,53 @@ static NSSet *IOSDebIgnoredQuizTexts(void) {
     observation.recognitionReason = @"no_target";
     if (![elements isKindOfClass:NSArray.class] || elements.count == 0) return observation;
 
-    NSSet *ignoredTexts = IOSDebIgnoredQuizTexts();
     CGPoint nextBtnPt = CGPointZero;
     BOOL hasNextBtn = NO;
+    BOOL examMode = NO;
+    NSInteger questionIndex = 0;
+    NSInteger questionTotal = 0;
+
     NSMutableArray<NSDictionary *> *wordCandidates = [NSMutableArray array];
+    NSMutableArray<NSDictionary *> *englishOptionPool = [NSMutableArray array];
     NSMutableArray<NSDictionary *> *chineseCandidates = [NSMutableArray array];
     NSMutableArray<NSDictionary *> *optionElements = [NSMutableArray array];
     double answerEnd = DBL_MAX;
     double targetEnd = DBL_MAX;
     BOOL explicitFeedback = NO, resultPage = NO;
+
     // Result and explanation content never creates a new question fingerprint.
     for (NSDictionary *el in elements) {
         if (![el isKindOfClass:NSDictionary.class]) continue;
         NSString *text = el[@"text"];
         if (![text isKindOfClass:NSString.class]) continue;
-        if ([text containsString:@"回答正确"] || [text containsString:@"回答错误"] ||
-            [text containsString:@"正确答案"] || [text isEqual:@"答对了"] || [text isEqual:@"答错了"]) {
+        NSString *t = [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSDictionary *r = el[@"rect"];
+
+        NSInteger qIdx = 0, qTotal = 0;
+        if ([IOSDebLexicon parseExamProgressText:t index:&qIdx total:&qTotal]) {
+            examMode = YES;
+            questionIndex = qIdx;
+            questionTotal = qTotal;
+        }
+        if ([t containsString:@"选择题"] || [t containsString:@"单选题"] || [t containsString:@"距截止"] ||
+            [t containsString:@"自动提交"] || [t containsString:@"未答题目"] || [IOSDebLexicon isSubmitButtonText:t]) {
+            examMode = YES;
+        }
+        if ([t containsString:@"回答正确"] || [t containsString:@"回答错误"] ||
+            [t containsString:@"正确答案"] || [t isEqual:@"答对了"] || [t isEqual:@"答错了"]) {
             explicitFeedback = YES; resultPage = YES;
-            NSDictionary *r = el[@"rect"];
             if (r) answerEnd = MIN(answerEnd, [r[@"y"] doubleValue]);
         }
-        if ([text containsString:@"记忆解析"] || [text containsString:@"词根拆解"] ||
-            [text containsString:@"关联词"] || [text containsString:@"助记"] || [text containsString:@"例句"]) {
-            NSDictionary *r = el[@"rect"];
+        if ([t containsString:@"记忆解析"] || [t containsString:@"词根拆解"] ||
+            [t containsString:@"关联词"] || [t containsString:@"助记"] || [t containsString:@"例句"]) {
             if (r) answerEnd = MIN(answerEnd, [r[@"y"] doubleValue]);
             resultPage = YES;
             if (r) targetEnd = MIN(targetEnd, [r[@"y"] doubleValue]);
         }
-        if ([IOSDebLexicon isNextButtonText:text] || [text containsString:@"上一题"]) {
-            NSDictionary *r = el[@"rect"];
-            if (r) targetEnd = MIN(targetEnd, [r[@"y"] doubleValue]);
+        if ([IOSDebLexicon isNextButtonText:t] || [t containsString:@"上一题"] || [IOSDebLexicon isSubmitButtonText:t]) {
+            if (r && [r[@"y"] doubleValue] > 100.0) {
+                targetEnd = MIN(targetEnd, [r[@"y"] doubleValue]);
+            }
         }
     }
 
@@ -440,7 +704,8 @@ static NSSet *IOSDebIgnoredQuizTexts(void) {
         NSString *cleanTrim = [txt stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if ([IOSDebLexicon isNextButtonText:cleanTrim]) {
             NSDictionary *r = el[@"rect"];
-            if (r) {
+            BOOL enabled = (!el[@"enabled"] || [el[@"enabled"] boolValue]);
+            if (r && enabled) {
                 nextBtnPt = CGPointMake([r[@"x"] doubleValue] + [r[@"width"] doubleValue] / 2.0,
                                         [r[@"y"] doubleValue] + [r[@"height"] doubleValue] / 2.0);
                 hasNextBtn = YES;
@@ -448,19 +713,15 @@ static NSSet *IOSDebIgnoredQuizTexts(void) {
             continue;
         }
 
-        if ([ignoredTexts containsObject:cleanTrim] &&
-            [cleanTrim rangeOfString:@"[\\u4e00-\\u9fa5]" options:NSRegularExpressionSearch].location == NSNotFound) continue;
-        if ([cleanTrim containsString:@"上一题"]) continue;
-        if ([cleanTrim containsString:@"正确答案"] || [cleanTrim containsString:@"记忆解析"] ||
-            [cleanTrim containsString:@"词根拆解"] || [cleanTrim containsString:@"你的选择"]) continue;
-        if ([cleanTrim containsString:@"已学"] || [cleanTrim containsString:@"/ 30"] || [cleanTrim containsString:@"/ 10"]) continue;
+        if ([IOSDebLexicon isQuizChromeText:cleanTrim]) continue;
 
         NSDictionary *r = el[@"rect"];
         if (!r) continue;
         double cy = [r[@"y"] doubleValue] + [r[@"height"] doubleValue] / 2.0;
+        if (cy <= 90.0) continue;
 
         NSRange zhRange = [cleanTrim rangeOfString:@"[\\u4e00-\\u9fa5]" options:NSRegularExpressionSearch];
-        if (zhRange.location != NSNotFound && cleanTrim.length <= 25) {
+        if (zhRange.location != NSNotFound && cleanTrim.length <= 80) {
             if (cy >= answerEnd) continue;
             [chineseCandidates addObject:el];
             continue;
@@ -469,21 +730,151 @@ static NSSet *IOSDebIgnoredQuizTexts(void) {
         // Stage 1: Detect pronunciation candidates (/.../ or [...]) before lexical classification.
         NSString *phoneticText = [IOSDebLexicon extractPronunciationText:cleanTrim];
         if (phoneticText) {
-            // Defer layout confirmation until after the word head is known;
-            // store in a temp list for later geometry-based confirmation.
             if (!pronunciationTemp) pronunciationTemp = [NSMutableArray array];
             [pronunciationTemp addObject:el];
             continue;
         }
 
-        NSRange enRange = [cleanTrim rangeOfString:@"^[a-zA-Z0-9\\-\\s/]+$" options:NSRegularExpressionSearch];
-        BOOL hasLetter = [cleanTrim rangeOfCharacterFromSet:[NSCharacterSet letterCharacterSet]].location != NSNotFound;
-        BOOL endsWithPunct = [cleanTrim hasSuffix:@"."] || [cleanTrim hasSuffix:@"!"] || [cleanTrim hasSuffix:@"?"] || [cleanTrim hasSuffix:@"。"];
-        if (enRange.location != NSNotFound && hasLetter && !endsWithPunct && cleanTrim.length >= 2 && cleanTrim.length <= 35 && cy > 90 && cy < targetEnd) {
-            [wordCandidates addObject:el];
+        NSRange enRange = [cleanTrim rangeOfString:@"^[a-zA-Z0-9\\s/'’().&+,:_#%@=~（）-]+$" options:NSRegularExpressionSearch];
+        BOOL hasLetter = [cleanTrim rangeOfString:@"[a-zA-Z]" options:NSRegularExpressionSearch].location != NSNotFound;
+        BOOL endsWithPunct = [cleanTrim hasSuffix:@"!"] || [cleanTrim hasSuffix:@"?"] || [cleanTrim hasSuffix:@"。"];
+        if (!endsWithPunct && [cleanTrim hasSuffix:@"."]) {
+            NSUInteger words = [[cleanTrim componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]].count;
+            endsWithPunct = (words >= 4);
+        }
+        if (enRange.location != NSNotFound && hasLetter && !endsWithPunct && cy < targetEnd && cleanTrim.length <= 80) {
+            [englishOptionPool addObject:el];
+            if (cleanTrim.length >= 2 && cleanTrim.length <= 60) {
+                [wordCandidates addObject:el];
+            }
         }
     }
 
+    observation.examMode = examMode;
+    observation.questionIndex = questionIndex;
+    observation.questionTotal = questionTotal;
+
+    // Step 1: Try Chinese-Prompt -> English-Options mode (ZH -> EN) first when an explicit Chinese prompt exists
+    // or when >= 4 English candidates appear below a Chinese prompt cue.
+    NSDictionary *zhPromptEl = nil;
+    NSString *zhPromptCue = nil;
+    BOOL explicitZhPrompt = NO;
+    for (NSDictionary *cel in chineseCandidates) {
+        NSString *cue = [IOSDebLexicon extractChinesePromptCue:cel[@"text"]];
+        if (cue.length > 0) {
+            zhPromptEl = cel;
+            zhPromptCue = cue;
+            explicitZhPrompt = YES;
+            break;
+        }
+    }
+
+    if (!zhPromptEl && englishOptionPool.count >= 4 && chineseCandidates.count > 0) {
+        // Implicit ZH->EN fallback: pick lowest Chinese text sitting strictly above the vertical block of English options.
+        NSArray<NSDictionary *> *sortedEn = [englishOptionPool sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            double ay = [a[@"rect"][@"y"] doubleValue], by = [b[@"rect"][@"y"] doubleValue];
+            return ay < by ? NSOrderedAscending : (ay > by ? NSOrderedDescending : NSOrderedSame);
+        }];
+        double firstOptY = [sortedEn.firstObject[@"rect"][@"y"] doubleValue];
+        double bestPromptY = -DBL_MAX;
+        for (NSDictionary *cel in chineseCandidates) {
+            NSDictionary *cr = cel[@"rect"];
+            double cBottom = [cr[@"y"] doubleValue] + [cr[@"height"] doubleValue];
+            NSString *ct = [cel[@"text"] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (cBottom <= firstOptY + 4.0 && ct.length <= 40 && [cr[@"y"] doubleValue] > bestPromptY) {
+                bestPromptY = [cr[@"y"] doubleValue];
+                zhPromptEl = cel;
+                zhPromptCue = ct;
+            }
+        }
+    }
+
+    if (zhPromptEl && zhPromptCue.length > 0) {
+        NSDictionary *pr = zhPromptEl[@"rect"];
+        double promptBottom = [pr[@"y"] doubleValue] + [pr[@"height"] doubleValue];
+        double optEnd = answerEnd;
+        for (NSDictionary *el in elements) {
+            NSString *text = el[@"text"];
+            NSDictionary *r = el[@"rect"];
+            if (r && ([IOSDebLexicon isNextButtonText:text] ||
+                      ([text isKindOfClass:NSString.class] && [text containsString:@"上一题"]) ||
+                      [IOSDebLexicon isSubmitButtonText:text])) {
+                if ([r[@"y"] doubleValue] >= promptBottom) optEnd = MIN(optEnd, [r[@"y"] doubleValue]);
+            }
+        }
+
+        NSArray<NSDictionary *> *sortedEn = [englishOptionPool sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            double ay = [a[@"rect"][@"y"] doubleValue], by = [b[@"rect"][@"y"] doubleValue];
+            return ay < by ? NSOrderedAscending : (ay > by ? NSOrderedDescending : NSOrderedSame);
+        }];
+
+        NSMutableArray<NSString *> *zhEnOpts = [NSMutableArray array];
+        NSMutableArray<NSDictionary *> *zhEnEls = [NSMutableArray array];
+        for (NSDictionary *el in sortedEn) {
+            NSDictionary *r = el[@"rect"];
+            double y = [r[@"y"] doubleValue];
+            if (y < promptBottom - 2.0 || y >= optEnd) continue;
+            NSString *txt = [el[@"text"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            if (!txt.length || [zhEnOpts containsObject:txt]) continue;
+            [zhEnOpts addObject:txt];
+            [zhEnEls addObject:el];
+        }
+
+        // If >4 English texts exist below prompt, find the unique contiguous 4-option aligned block if available.
+        if (zhEnEls.count > 4) {
+            NSMutableArray<NSArray<NSDictionary *> *> *alignedBlocks = [NSMutableArray array];
+            for (NSUInteger i = 0; i + 3 < zhEnEls.count; i++) {
+                NSArray<NSDictionary *> *slice = [zhEnEls subarrayWithRange:NSMakeRange(i, 4)];
+                if (IOSDebElementsAreAlignedOptions(slice, 45.0, 65.0)) {
+                    [alignedBlocks addObject:slice];
+                }
+            }
+            if (alignedBlocks.count == 1) {
+                [zhEnEls setArray:alignedBlocks.firstObject];
+                [zhEnOpts removeAllObjects];
+                for (NSDictionary *el in zhEnEls) {
+                    [zhEnOpts addObject:[el[@"text"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]];
+                }
+            }
+        }
+
+        if (zhEnEls.count == 4 && IOSDebElementsAreAlignedOptions(zhEnEls, 45.0, 65.0)) {
+            observation.englishCandidates = @[zhPromptCue];
+            observation.answerCandidates = [zhEnOpts copy];
+            observation.observedWord = zhPromptCue;
+
+            IOSDebQuizFingerprint *fp = [[IOSDebQuizFingerprint alloc] init];
+            fp.direction = IOSDebQuizDirectionChineseToEnglish;
+            fp.rawEnglishWord = zhPromptEl[@"text"];
+            fp.englishWord = zhPromptCue;
+            fp.chinesePrompt = zhPromptCue;
+            fp.optionTexts = [zhEnOpts copy];
+            fp.optionElements = [zhEnEls copy];
+            fp.signature = [NSString stringWithFormat:@"zh2en:%@|%@", zhPromptCue,
+                            [[zhEnOpts sortedArrayUsingSelector:@selector(compare:)] componentsJoinedByString:@","]];
+            fp.examMode = examMode;
+            fp.questionIndex = questionIndex;
+            fp.questionTotal = questionTotal;
+            fp.hasNextButton = hasNextBtn;
+            fp.nextButtonPoint = nextBtnPt;
+
+            observation.identityFingerprint = fp;
+            observation.fingerprint = explicitFeedback ? nil : fp;
+            observation.phase = resultPage ? IOSDebQuizPageResult : IOSDebQuizPageAnswer;
+            observation.recognitionReason = resultPage ? @"result" : @"complete_question";
+            return observation;
+        }
+        if (explicitZhPrompt) {
+            observation.englishCandidates = @[zhPromptCue];
+            observation.answerCandidates = zhEnOpts.count ? [zhEnOpts copy] : ([englishOptionPool valueForKeyPath:@"text"] ?: @[]);
+            observation.phase = resultPage ? IOSDebQuizPageResult : (englishOptionPool.count ? IOSDebQuizPageTransition : IOSDebQuizPageOther);
+            observation.recognitionReason = zhEnEls.count > 4 ? @"mixed_options" : @"incomplete_options";
+            return observation;
+        }
+    }
+
+    // Step 2: Existing English-Word -> Chinese-Options mode (EN -> ZH)
     NSMutableArray *words = [NSMutableArray array];
     for (NSDictionary *el in wordCandidates) [words addObject:[self cleanEnglishWord:el[@"text"]]];
     observation.englishCandidates = words;
@@ -494,21 +885,18 @@ static NSSet *IOSDebIgnoredQuizTexts(void) {
         NSDictionary *headRect = headEl[@"rect"];
         double headBottom = [headRect[@"y"] doubleValue] + [headRect[@"height"] doubleValue];
         double headCenterX = [headRect[@"x"] doubleValue] + [headRect[@"width"] doubleValue] / 2.0;
-        // Determine the first answer candidate Y below the word head.
         double firstAnswerY = DBL_MAX;
         for (NSDictionary *cc in chineseCandidates) {
             NSDictionary *ccr = cc[@"rect"];
             double ccY = [ccr[@"y"] doubleValue];
             if (ccY >= headBottom && ccY < firstAnswerY) firstAnswerY = ccY;
         }
-        // Fallback: use navigation or explanation boundary.
         if (firstAnswerY == DBL_MAX) firstAnswerY = answerEnd;
         for (NSDictionary *pel in pronunciationTemp) {
             NSDictionary *pr = pel[@"rect"];
             double pY = [pr[@"y"] doubleValue];
             double pBottom = pY + [pr[@"height"] doubleValue];
             double pCenterX = [pr[@"x"] doubleValue] + [pr[@"width"] doubleValue] / 2.0;
-            // Must be below word head, above first answer (or boundary).
             if (pY >= headBottom && pBottom <= firstAnswerY + 1.0 &&
                 fabs(pCenterX - headCenterX) <= 60.0) {
                 NSString *ptxt = [IOSDebLexicon extractPronunciationText:
@@ -521,7 +909,13 @@ static NSSet *IOSDebIgnoredQuizTexts(void) {
     observation.pronunciationCandidates = [confirmedPhonetics copy];
     observation.phase = resultPage ? IOSDebQuizPageResult : words.count ? IOSDebQuizPageTransition : IOSDebQuizPageOther;
     if (wordCandidates.count != 1) {
-        observation.recognitionReason = words.count > 1 ? @"mixed_targets" : @"no_target";
+        if (zhPromptEl) {
+            observation.englishCandidates = @[zhPromptCue];
+            observation.answerCandidates = [englishOptionPool valueForKeyPath:@"text"];
+            observation.recognitionReason = englishOptionPool.count > 4 ? @"mixed_options" : @"incomplete_options";
+        } else {
+            observation.recognitionReason = words.count > 1 ? @"mixed_targets" : @"no_target";
+        }
         return observation;
     }
     NSDictionary *bestWordEl = wordCandidates.firstObject;
@@ -552,12 +946,17 @@ static NSSet *IOSDebIgnoredQuizTexts(void) {
     }
 
     IOSDebQuizFingerprint *fp = [[IOSDebQuizFingerprint alloc] init];
+    fp.direction = IOSDebQuizDirectionEnglishToChinese;
     fp.rawEnglishWord = bestWordEl[@"text"];
     fp.englishWord = [self cleanEnglishWord:bestWordEl[@"text"]];
+    fp.chinesePrompt = @"";
     fp.optionTexts = [optionTexts copy];
     fp.optionElements = [optionElements copy];
     fp.signature = [NSString stringWithFormat:@"%@|%@", fp.englishWord,
                     [[optionTexts sortedArrayUsingSelector:@selector(compare:)] componentsJoinedByString:@","]];
+    fp.examMode = examMode;
+    fp.questionIndex = questionIndex;
+    fp.questionTotal = questionTotal;
     fp.hasNextButton = hasNextBtn;
     fp.nextButtonPoint = nextBtnPt;
     observation.identityFingerprint = fp;
@@ -595,6 +994,50 @@ static NSSet *IOSDebIgnoredQuizTexts(void) {
 
 - (NSDictionary *)decisionOnFingerprint:(IOSDebQuizFingerprint *)fp {
     if (!fp) return @{@"reason": @"答题页未识别", @"found": @NO};
+
+    if (fp.direction == IOSDebQuizDirectionChineseToEnglish) {
+        NSString *prompt = fp.chinesePrompt.length ? fp.chinesePrompt : fp.englishWord;
+        NSMutableArray *scores = [NSMutableArray array];
+        NSMutableArray<NSString *> *missingWords = [NSMutableArray array];
+        BOOL foundAny = NO;
+        double top = 0, second = 0;
+        NSString *winner = @"";
+
+        for (NSString *option in fp.optionTexts) {
+            NSArray *meanings = [self lookupMeaningsForWord:option] ?: @[];
+            if (meanings.count > 0) {
+                foundAny = YES;
+            } else {
+                [missingWords addObject:option];
+            }
+            double score = [self scoreChinesePrompt:prompt againstMeanings:meanings];
+            [scores addObject:@{@"option": option, @"score": @(score)}];
+            if (score > top) { second = top; top = score; winner = option; }
+            else if (score > second) second = score;
+        }
+
+        // If any option English word is absent from local lexicon, only trust a strong direct hit (>= 0.90);
+        // otherwise report 词库缺词 so cloud fallback can inspect the unknown option cleanly.
+        NSString *reason = nil;
+        if (!foundAny || (missingWords.count > 0 && top < 0.90)) {
+            reason = @"词库缺词";
+        } else if (top < 0.75) {
+            reason = @"选项未匹配";
+        } else if (top - second < 0.15 && second != 0) {
+            reason = @"候选分数接近";
+        } else {
+            reason = @"本地命中";
+        }
+        return @{@"reason": reason,
+                 @"found": @(foundAny),
+                 @"direction": @"zh2en",
+                 @"prompt": prompt ?: @"",
+                 @"missingWords": missingWords,
+                 @"scores": scores,
+                 @"winner": winner,
+                 @"score": @(top)};
+    }
+
     NSArray *meanings = [self lookupMeaningsForWord:fp.englishWord] ?: @[];
     NSMutableArray *scores = [NSMutableArray array];
     double top = 0, second = 0;
@@ -607,8 +1050,8 @@ static NSSet *IOSDebIgnoredQuizTexts(void) {
     }
     NSString *reason = !meanings.count ? @"词库缺词" : top < 0.75 ? @"选项未匹配" :
         (top - second < 0.15 && second != 0) ? @"候选分数接近" : @"本地命中";
-    return @{@"reason": reason, @"found": @(meanings.count > 0), @"meanings": meanings,
-             @"scores": scores, @"winner": winner, @"score": @(top)};
+    return @{@"reason": reason, @"found": @(meanings.count > 0), @"direction": @"en2zh",
+             @"meanings": meanings, @"scores": scores, @"winner": winner, @"score": @(top)};
 }
 
 @end
