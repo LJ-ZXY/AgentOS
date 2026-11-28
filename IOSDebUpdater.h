@@ -3,7 +3,7 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-#define AGENTOS_VERSION @"2.1.6-beta.4"
+#define AGENTOS_VERSION @"2.1.6-beta.5"
 #define AGENTOS_GITHUB_REPO @"LJ-ZXY/AgentOS"
 #define AGENTOS_RELEASES_API @"https://api.github.com/repos/LJ-ZXY/AgentOS/releases/latest"
 #define AGENTOS_GITHUB_RELEASES_LIST_API @"https://api.github.com/repos/LJ-ZXY/AgentOS/releases?per_page=10"

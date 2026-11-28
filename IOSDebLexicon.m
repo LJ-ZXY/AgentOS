@@ -717,8 +717,13 @@ static BOOL IOSDebElementsAreAlignedOptions(NSArray<NSDictionary *> *items, doub
 
         NSDictionary *r = el[@"rect"];
         if (!r) continue;
-        double cy = [r[@"y"] doubleValue] + [r[@"height"] doubleValue] / 2.0;
+        double rx = [r[@"x"] doubleValue], ry = [r[@"y"] doubleValue];
+        double rw = [r[@"width"] doubleValue], rh = [r[@"height"] doubleValue];
+        double cy = ry + rh / 2.0;
         if (cy <= 90.0) continue;
+        // Skip underlying host-app container chrome leaked into AX tree (e.g. WeChat chat-list rows or bottom tab bar).
+        if ((rx <= 2.0 && rw >= 360.0 && rh >= 48.0) || (ry >= 740.0 && rh >= 70.0)) continue;
+        if ([cleanTrim containsString:@"条未读"] || [cleanTrim containsString:@"http://"] || [cleanTrim containsString:@"https://"]) continue;
 
         NSRange zhRange = [cleanTrim rangeOfString:@"[\\u4e00-\\u9fa5]" options:NSRegularExpressionSearch];
         if (zhRange.location != NSNotFound && cleanTrim.length <= 80) {
@@ -745,7 +750,7 @@ static BOOL IOSDebElementsAreAlignedOptions(NSArray<NSDictionary *> *items, doub
         }
         if (enRange.location != NSNotFound && hasLetter && !endsWithPunct && cy < targetEnd && cleanTrim.length <= 80) {
             [englishOptionPool addObject:el];
-            if (cleanTrim.length >= 2 && cleanTrim.length <= 60) {
+            if (cleanTrim.length >= 2 && cleanTrim.length <= 45) {
                 [wordCandidates addObject:el];
             }
         }
@@ -908,7 +913,83 @@ static BOOL IOSDebElementsAreAlignedOptions(NSArray<NSDictionary *> *items, doub
     }
     observation.pronunciationCandidates = [confirmedPhonetics copy];
     observation.phase = resultPage ? IOSDebQuizPageResult : words.count ? IOSDebQuizPageTransition : IOSDebQuizPageOther;
-    if (wordCandidates.count != 1) {
+
+    BOOL (^isValidAlignedBlock)(NSArray<NSDictionary *> *) = ^BOOL(NSArray<NSDictionary *> *slice) {
+        if (!IOSDebElementsAreAlignedOptions(slice, 45.0, 65.0)) return NO;
+        for (NSUInteger j = 1; j < slice.count; j++) {
+            NSDictionary *pr = slice[j - 1][@"rect"];
+            NSDictionary *cr = slice[j][@"rect"];
+            if ([pr[@"y"] doubleValue] + [pr[@"height"] doubleValue] > [cr[@"y"] doubleValue] + 2.0) {
+                return NO;
+            }
+        }
+        return YES;
+    };
+
+    NSDictionary *bestWordEl = nil;
+    NSArray<NSDictionary *> *resolvedEnZhBlock = nil;
+    if (wordCandidates.count == 1) {
+        bestWordEl = wordCandidates.firstObject;
+    } else if (!zhPromptEl && wordCandidates.count > 1 && chineseCandidates.count >= 1) {
+        // Recover EN -> ZH screens where 1+ option cards are pure English acronyms (e.g. "CAN FD")
+        // sitting cleanly inside the aligned 4-option block below the topmost target word.
+        NSArray<NSDictionary *> *sortedWords = [wordCandidates sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            double ay = [a[@"rect"][@"y"] doubleValue], by = [b[@"rect"][@"y"] doubleValue];
+            return ay < by ? NSOrderedAscending : (ay > by ? NSOrderedDescending : NSOrderedSame);
+        }];
+        NSDictionary *topEl = sortedWords.firstObject;
+        NSDictionary *topRect = topEl[@"rect"];
+        double topBottom = [topRect[@"y"] doubleValue] + [topRect[@"height"] doubleValue];
+        double topCenter = [topRect[@"x"] doubleValue] + [topRect[@"width"] doubleValue] / 2.0;
+        double optLimitY = answerEnd;
+        for (NSDictionary *el in elements) {
+            NSString *text = el[@"text"];
+            NSDictionary *r = el[@"rect"];
+            if (r && ([IOSDebLexicon isNextButtonText:text] || ([text isKindOfClass:NSString.class] && [text containsString:@"上一题"]))) {
+                if ([r[@"y"] doubleValue] >= topBottom) optLimitY = MIN(optLimitY, [r[@"y"] doubleValue]);
+            }
+        }
+        NSMutableArray<NSDictionary *> *mixedPool = [NSMutableArray array];
+        NSMutableArray<NSString *> *seenPoolTexts = [NSMutableArray array];
+        for (NSArray<NSDictionary *> *src in @[chineseCandidates, englishOptionPool]) {
+            for (NSDictionary *el in src) {
+                if (el == topEl) continue;
+                NSDictionary *r = el[@"rect"];
+                double y = [r[@"y"] doubleValue];
+                double center = [r[@"x"] doubleValue] + [r[@"width"] doubleValue] / 2.0;
+                if (y < topBottom || y >= optLimitY || fabs(center - topCenter) > 60.0) continue;
+                NSString *txt = [el[@"text"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+                if (!txt.length || [seenPoolTexts containsObject:txt]) continue;
+                [seenPoolTexts addObject:txt];
+                [mixedPool addObject:el];
+            }
+        }
+        NSArray<NSDictionary *> *sortedMixed = [mixedPool sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            double ay = [a[@"rect"][@"y"] doubleValue], by = [b[@"rect"][@"y"] doubleValue];
+            return ay < by ? NSOrderedAscending : (ay > by ? NSOrderedDescending : NSOrderedSame);
+        }];
+        NSMutableArray<NSArray<NSDictionary *> *> *validBlocks = [NSMutableArray array];
+        for (NSUInteger i = 0; i + 3 < sortedMixed.count; i++) {
+            NSArray<NSDictionary *> *slice = [sortedMixed subarrayWithRange:NSMakeRange(i, 4)];
+            if (!isValidAlignedBlock(slice)) continue;
+            BOOL hasChinese = NO;
+            for (NSDictionary *sel in slice) {
+                if ([chineseCandidates containsObject:sel]) { hasChinese = YES; break; }
+            }
+            if (!hasChinese) continue;
+            BOOL allExtraWordsInSlice = YES;
+            for (NSUInteger w = 1; w < sortedWords.count; w++) {
+                if (![slice containsObject:sortedWords[w]]) { allExtraWordsInSlice = NO; break; }
+            }
+            if (allExtraWordsInSlice) [validBlocks addObject:slice];
+        }
+        if (validBlocks.count == 1) {
+            bestWordEl = topEl;
+            resolvedEnZhBlock = validBlocks.firstObject;
+        }
+    }
+
+    if (!bestWordEl) {
         if (zhPromptEl) {
             observation.englishCandidates = @[zhPromptCue];
             observation.answerCandidates = [englishOptionPool valueForKeyPath:@"text"];
@@ -918,11 +999,12 @@ static BOOL IOSDebElementsAreAlignedOptions(NSArray<NSDictionary *> *items, doub
         }
         return observation;
     }
-    NSDictionary *bestWordEl = wordCandidates.firstObject;
     NSDictionary *wordRect = bestWordEl[@"rect"];
     double wordBottom = [wordRect[@"y"] doubleValue] + [wordRect[@"height"] doubleValue];
     double wordCenter = [wordRect[@"x"] doubleValue] + [wordRect[@"width"] doubleValue]/2;
-    observation.observedWord = words.firstObject;
+    NSString *cleanedTarget = [self cleanEnglishWord:bestWordEl[@"text"]];
+    observation.englishCandidates = cleanedTarget.length ? @[cleanedTarget] : @[];
+    observation.observedWord = cleanedTarget;
     for (NSDictionary *el in elements) {
         NSString *text = el[@"text"];
         NSDictionary *r = el[@"rect"];
@@ -931,13 +1013,39 @@ static BOOL IOSDebElementsAreAlignedOptions(NSArray<NSDictionary *> *items, doub
         }
     }
     NSMutableArray<NSString *> *optionTexts = [NSMutableArray array];
-    for (NSDictionary *el in chineseCandidates) {
-        NSDictionary *r = el[@"rect"];
-        double center = [r[@"x"] doubleValue] + [r[@"width"] doubleValue]/2;
-        if ([r[@"y"] doubleValue] < wordBottom || [r[@"y"] doubleValue] >= answerEnd || fabs(center - wordCenter) > 60) continue;
-        NSString *text = [el[@"text"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-        if ([optionTexts containsObject:text]) continue;
-        [optionTexts addObject:text]; [optionElements addObject:el];
+    if (resolvedEnZhBlock) {
+        for (NSDictionary *el in resolvedEnZhBlock) {
+            NSString *text = [el[@"text"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            [optionTexts addObject:text];
+            [optionElements addObject:el];
+        }
+    } else {
+        for (NSDictionary *el in chineseCandidates) {
+            NSDictionary *r = el[@"rect"];
+            double center = [r[@"x"] doubleValue] + [r[@"width"] doubleValue]/2;
+            if ([r[@"y"] doubleValue] < wordBottom || [r[@"y"] doubleValue] >= answerEnd || fabs(center - wordCenter) > 60) continue;
+            NSString *text = [el[@"text"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            if ([optionTexts containsObject:text]) continue;
+            [optionTexts addObject:text]; [optionElements addObject:el];
+        }
+    }
+    if (optionElements.count > 4) {
+        NSArray<NSDictionary *> *sortedZh = [optionElements sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            double ay = [a[@"rect"][@"y"] doubleValue], by = [b[@"rect"][@"y"] doubleValue];
+            return ay < by ? NSOrderedAscending : (ay > by ? NSOrderedDescending : NSOrderedSame);
+        }];
+        NSMutableArray<NSArray<NSDictionary *> *> *alignedBlocks = [NSMutableArray array];
+        for (NSUInteger i = 0; i + 3 < sortedZh.count; i++) {
+            NSArray<NSDictionary *> *slice = [sortedZh subarrayWithRange:NSMakeRange(i, 4)];
+            if (isValidAlignedBlock(slice)) [alignedBlocks addObject:slice];
+        }
+        if (alignedBlocks.count == 1) {
+            [optionElements setArray:alignedBlocks.firstObject];
+            [optionTexts removeAllObjects];
+            for (NSDictionary *el in optionElements) {
+                [optionTexts addObject:[el[@"text"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]];
+            }
+        }
     }
     observation.answerCandidates = optionTexts;
     if (optionTexts.count != 4) {

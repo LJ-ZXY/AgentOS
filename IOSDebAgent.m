@@ -980,9 +980,13 @@ static NSString *IOSDebHumanTool(NSString *name) {
     NSDate *cloudStart = [NSDate date];
     NSUInteger cloudGeneration = _runGeneration;
     if (_quizMode) [self syncQuizCloudSnapshot];
-    [self quizEvent:@"cloud_request" fields:@{@"sequence": @(cloudSequence), @"reason": _fallbackReason ?: @"normal",
+    NSMutableDictionary *cloudFields = [@{@"sequence": @(cloudSequence), @"reason": _fallbackReason ?: @"normal",
         @"snapshotFingerprint": _quizMode ? (_lastQuizObservation.identityFingerprint.signature ?: @"") : @"",
-        @"phase": @([[IOSDebLexicon shared] quizPhaseOnElements:_lastElements])}];
+        @"phase": @([[IOSDebLexicon shared] quizPhaseOnElements:_lastElements])} mutableCopy];
+    if (_quizMode && !_lastQuizObservation.fingerprint) {
+        cloudFields[@"screenSummary"] = [self quizScreenSummary];
+    }
+    [self quizEvent:@"cloud_request" fields:cloudFields];
     [[IOSDebLLMClient shared] completeWithMessages:_messages
                                             tools:_toolSchema
                                        completion:^(NSDictionary *json, NSString *text, NSString *error) {
@@ -1649,7 +1653,8 @@ static NSString *IOSDebHumanTool(NSString *name) {
                 if (completion) completion(); return;
             }
             BOOL wrong = [self->_quizState.feedback containsString:@"回答错误"] || [self->_quizState.feedback containsString:@"答错了"];
-            if (!afterNext && (wrong || self->_quizState.entryRecovery)) {
+            if (!afterNext && (wrong || self->_quizState.entryRecovery) &&
+                (self->_quizState.pageRelation == IOSDebQuizPageSame || feedback.length > 0)) {
                 [self recoverQuizResultSkipRead:YES completion:completion]; return;
             }
             if (!fp && !feedback.length) {
